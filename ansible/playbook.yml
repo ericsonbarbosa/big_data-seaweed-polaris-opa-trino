@@ -1,0 +1,47 @@
+---
+- name: "Configuração da Infraestrutura de Dados"
+  hosts: all
+  become: yes
+  roles:
+    - role: common
+      tags: common
+
+- name: "Configuração do PostgreSQL (VM 1)"
+  hosts: seaweed-nodes
+  become: yes
+  roles:
+    - role: postgres
+      tags: postgres
+  post_tasks:
+    - name: "Forçar execução dos handlers pendentes"
+      meta: flush_handlers
+
+    - name: "Aguardar PostgreSQL aceitar conexões externas"
+      wait_for:
+        host: "192.168.56.101"
+        port: 5432
+        delay: 3
+        timeout: 30
+
+- name: "Configuração do SeaweedFS e Polaris (VM 1)"
+  hosts: seaweed-nodes
+  become: yes
+  roles:
+    - role: seaweed
+      tags: seaweed
+    - role: polaris
+      tags: polaris
+
+- name: "Configuração do Motor de Consulta (VM 2)"
+  hosts: trino-nodes
+  become: yes
+  roles:
+    - role: trino
+      tags: trino
+
+- name: "Configuração do Nó Kubernetes (VM 3)"
+  hosts: k8s-nodes
+  become: yes
+  roles:
+    - role: k8s-seaweed-csi
+      tags: k8s-seaweed-csi

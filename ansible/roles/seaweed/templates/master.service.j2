@@ -1,0 +1,13 @@
+[Unit]
+Description=SeaweedFS Master
+After=network.target
+
+[Service]
+User={{ seaweedfs_user }}
+Group={{ seaweedfs_group }}
+ExecStart=/usr/local/bin/weed master -port={{ seaweedfs_master_port }} -mdir={{ seaweedfs_data_dir }}/master -ip={{ seaweedfs_master_host }} -ip.bind=0.0.0.0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

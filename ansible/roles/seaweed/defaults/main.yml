@@ -1,0 +1,12 @@
+---
+seaweedfs_user: seaweedfs
+seaweedfs_group: seaweedfs
+seaweedfs_data_dir: /data/seaweedfs
+seaweedfs_master_port: 9333
+seaweedfs_volume_port: 8080
+seaweedfs_filer_port: 8888
+seaweedfs_s3_port: 8333
+seaweedfs_master_host: "192.168.56.101"
+seaweedfs_volume_max: 50
+seaweedfs_s3_access_key: "admin"
+seaweedfs_s3_secret_key: "admin_secret"

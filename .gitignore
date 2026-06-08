@@ -1,0 +1,47 @@
+# ===================================================================
+# Vagrant
+# ===================================================================
+.vagrant/
+Vagrant.logfile
+*.box
+
+# ===================================================================
+# Infraestrutura (Ansible & Big Data Binaries)
+# Ignora os binários pesados e arquivos temporários de download
+# ===================================================================
+# Ignora qualquer arquivo compactado na raiz ou subpastas
+*.tar.gz
+*.tgz
+*.zip
+
+# Ignora as pastas de arquivos das roles (onde ficam Hive, Hadoop, Trino)
+# Usando caminhos relativos para cobrir qualquer estrutura de pastas
+**/roles/hadoop/files/
+**/roles/hive/files/
+**/roles/trino/files/
+**/ansible/files/
+
+# Arquivos temporários que o Ansible cria durante falhas de download
+ansible_get_url_payload*
+.retry
+
+# ===================================================================
+# Python
+# ===================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+*.egg-info/
+dist/
+build/
+
+# ===================================================================
+# IDEs e Sistema Operacional
+# ===================================================================
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

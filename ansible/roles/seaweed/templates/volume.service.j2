@@ -1,0 +1,13 @@
+[Unit]
+Description=SeaweedFS Volume
+After=seaweedfs-master.service
+
+[Service]
+User={{ seaweedfs_user }}
+Group={{ seaweedfs_group }}
+ExecStart=/usr/local/bin/weed volume -port={{ seaweedfs_volume_port }} -dir={{ seaweedfs_data_dir }}/volume -mserver={{ seaweedfs_master_host }}:{{ seaweedfs_master_port }} -ip={{ seaweedfs_master_host }} -max={{ seaweedfs_volume_max }} -ip.bind=0.0.0.0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

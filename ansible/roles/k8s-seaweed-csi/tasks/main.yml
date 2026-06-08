@@ -1,0 +1,198 @@
+---
+# ==============================================================================
+# 1. PREPARAÇÃO DO AMBIENTE
+# ==============================================================================
+- name: "k8s : Instalar dependências do sistema"
+  apt:
+    name:
+      - python3-pip
+      - curl
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: "k8s : Atualizar pip para versão compatível"
+  pip:
+    name: pip
+    state: latest
+  become: yes
+
+- name: "k8s : Instalar bibliotecas Python para o Ansible gerenciar K8s"
+  pip:
+    name:
+      - kubernetes
+      - PyYAML
+    extra_args: "--break-system-packages"
+  become: yes
+
+- name: "k8s : Garantir que o cgroup v2 esteja habilitado no GRUB"
+  lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX="(?!.*systemd.unified_cgroup_hierarchy=1)(.*)"'
+    line: 'GRUB_CMDLINE_LINUX="\1 systemd.unified_cgroup_hierarchy=1"'
+    backrefs: yes
+  register: grub_updated
+
+- name: "k8s : Atualizar GRUB se houver alterações"
+  command: update-grub
+  when: grub_updated.changed
+
+- name: "k8s : Reiniciar a VM para aplicar as mudanças de cgroup"
+  reboot:
+  when: grub_updated.changed
+
+# ==============================================================================
+# 2. INSTALAÇÃO DO K3S
+# ==============================================================================
+- name: "k8s : Baixar e instalar K3s"
+  shell: curl -sfL https://get.k3s.io | sh -
+  args:
+    creates: /usr/local/bin/k3s
+  become: yes
+
+- name: "k8s : Garantir que o K3s esteja iniciado e habilitado"
+  systemd:
+    name: k3s
+    state: started
+    enabled: yes
+  become: yes
+
+- name: "k8s : Aguardar que o nó fique pronto"
+  command: k3s kubectl get nodes
+  register: nodes_ready
+  until: "'Ready' in nodes_ready.stdout"
+  retries: 20
+  delay: 5
+  changed_when: false
+
+- name: "k8s : Criar diretório .kube para o usuário vagrant"
+  file:
+    path: /home/vagrant/.kube
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: '0700'
+  become: yes
+
+- name: "k8s : Copiar kubeconfig para o usuário vagrant"
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /home/vagrant/.kube/config
+    owner: vagrant
+    group: vagrant
+    mode: '0600'
+    remote_src: yes
+  become: yes
+
+- name: "k8s : Configurar KUBECONFIG no .bashrc do usuário vagrant"
+  lineinfile:
+    path: /home/vagrant/.bashrc
+    line: 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml'
+    state: present
+  become: yes
+
+# ==============================================================================
+# 3. INSTALAÇÃO DO HELM
+# ==============================================================================
+- name: "k8s : Baixar instalador do Helm"
+  get_url:
+    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    dest: /tmp/get_helm.sh
+    mode: '0755'
+
+- name: "k8s : Executar instalador do Helm"
+  command: /tmp/get_helm.sh
+  args:
+    creates: /usr/local/bin/helm
+  become: yes
+
+# ==============================================================================
+# 4. CONFIGURAÇÃO DO SEAWEEDFS CSI DRIVER
+# ==============================================================================
+- name: "k8s : Adicionar repositório Helm do SeaweedFS CSI Driver"
+  kubernetes.core.helm_repository:
+    name: "seaweedfs-csi-repo"
+    repo_url: "https://seaweedfs.github.io/seaweedfs-csi-driver/helm"
+  become: yes
+  changed_when: false
+
+- name: "k8s : Criar diretório de kubeconfig para o root"
+  file:
+    path: /root/.kube
+    state: directory
+    mode: '0700'
+  become: yes
+
+- name: "k8s : Linkar config do K3s para o local padrão do kubectl"
+  file:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /root/.kube/config
+    state: link
+  become: yes
+
+- name: "k8s : Verificar conectividade com o Filer do SeaweedFS"
+  wait_for:
+    host: 192.168.56.101
+    port: 8888
+    timeout: 30
+
+- name: "k8s : Verificar se o CSI Driver já está instalado e saudável"
+  command: helm status seaweedfs-csi -n kube-system
+  register: helm_status
+  failed_when: false
+  changed_when: false
+  become: yes
+
+- name: "k8s : Instalar SeaweedFS CSI Driver via Helm"
+  kubernetes.core.helm:
+    name: seaweedfs-csi
+    chart_ref: seaweedfs-csi-repo/seaweedfs-csi-driver
+    release_namespace: kube-system
+    wait: yes
+    wait_timeout: "300s"
+    update_repo_cache: yes
+    values:
+      seaweedfsFiler: "192.168.56.101:8888"
+      controller:
+        replicaCount: 1
+        affinity: {}
+  become: yes
+  when: helm_status.rc != 0 or 'deployed' not in helm_status.stdout
+
+# ==============================================================================
+# 5. DEFINIÇÃO DE RECURSOS DE STORAGE
+# ==============================================================================
+- name: "k8s : Criar arquivo de manifesto do StorageClass"
+  copy:
+    dest: /tmp/seaweedfs-sc.yaml
+    content: |
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: seaweedfs-storage
+        annotations:
+          storageclass.kubernetes.io/is-default-class: "true"
+      provisioner: seaweedfs-csi-driver
+      parameters:
+        filer: "192.168.56.101:8888"
+      reclaimPolicy: Retain
+      volumeBindingMode: Immediate
+  become: yes
+
+- name: "k8s : Remover StorageClass antigo se existir"
+  shell: k3s kubectl delete storageclass seaweedfs-storage --ignore-not-found=true
+  become: yes
+  changed_when: false
+
+- name: "k8s : Aplicar StorageClass"
+  command: k3s kubectl apply -f /tmp/seaweedfs-sc.yaml
+  become: yes
+  register: kubectl_apply
+  changed_when: "'created' in kubectl_apply.stdout or 'configured' in kubectl_apply.stdout"
+
+- name: "k8s : Desativar o local-path como storage padrão"
+  command: >
+    k3s kubectl patch storageclass local-path
+    -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+  become: yes
+  changed_when: false

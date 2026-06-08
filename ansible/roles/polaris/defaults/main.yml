@@ -1,0 +1,53 @@
+# ==============================================================================
+# USUÁRIO E DIRETÓRIOS
+# ==============================================================================
+polaris_user: polaris
+polaris_group: polaris
+polaris_install_dir: /opt/polaris
+polaris_data_dir: /data/polaris
+polaris_log_dir: /var/log/polaris
+polaris_conf_dir: /etc/polaris
+
+# ==============================================================================
+# JAVA
+# ==============================================================================
+polaris_java_package: openjdk-21-jdk
+polaris_java_home: /usr/lib/jvm/java-21-openjdk-amd64
+polaris_java_opts: "-Xms512m -Xmx1024m -XX:+UseG1GC"
+
+# ==============================================================================
+# POLARIS
+# ==============================================================================
+polaris_port: 8182
+polaris_admin_port: 8183
+polaris_realm: "POLARIS"
+polaris_root_client_id: "root"
+polaris_root_client_secret: "root_secret_changeme"
+
+# ==============================================================================
+# POSTGRES
+# ==============================================================================
+polaris_db_kind: postgresql
+polaris_db_host: localhost
+polaris_db_port: 5432
+polaris_db_name: polaris_db
+polaris_db_user: polaris_user
+polaris_db_pass: polaris_pass_secret
+
+polaris_db_url: "jdbc:postgresql://{{ polaris_db_host }}:{{ polaris_db_port }}/{{ polaris_db_name }}"
+
+# ==============================================================================
+# S3
+# ==============================================================================
+polaris_s3_endpoint: "http://192.168.56.101:8333"
+polaris_s3_access_key: admin
+polaris_s3_secret_key: admin_secret
+polaris_s3_region: us-east-1
+polaris_s3_path_style: true
+polaris_default_warehouse_bucket: warehouse
+
+# ==============================================================================
+# BINÁRIO
+# ==============================================================================
+polaris_archive: "polaris-bin-1.3.0-incubating.tgz"
+polaris_unarchive_dir: "polaris-1.3.0-incubating"

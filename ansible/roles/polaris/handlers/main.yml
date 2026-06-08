@@ -1,0 +1,11 @@
+---
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+  become: yes
+
+- name: restart polaris
+  systemd:
+    name: polaris
+    state: restarted
+  become: yes

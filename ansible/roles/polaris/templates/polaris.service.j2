@@ -1,0 +1,41 @@
+[Unit]
+Description=Apache Polaris — Iceberg REST Catalog
+Documentation=https://polaris.apache.org
+# Adicionado postgresql.service para garantir que o banco inicie antes do Polaris
+After=network.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ polaris_user }}
+Group={{ polaris_group }}
+WorkingDirectory={{ polaris_install_dir }}/server
+
+ExecStart={{ polaris_java_home }}/bin/java \
+  {{ polaris_java_opts }} \
+  -Dquarkus.config.locations={{ polaris_conf_dir }}/application.properties \
+  -jar {{ polaris_install_dir }}/server/quarkus-run.jar
+
+Environment="AWS_ACCESS_KEY_ID={{ polaris_s3_access_key }}"
+Environment="AWS_SECRET_ACCESS_KEY={{ polaris_s3_secret_key }}"
+Environment="AWS_REGION={{ polaris_s3_region }}"
+Environment="AWS_DEFAULT_REGION={{ polaris_s3_region }}"
+Environment="JAVA_HOME={{ polaris_java_home }}"
+
+# Evita que o systemd trate o encerramento normal do Java (SIGTERM) como falha
+SuccessExitStatus=143
+
+# Aumenta a tolerância de tempo caso o Java demore muito no boot pesado
+TimeoutStartSec=300
+
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polaris
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

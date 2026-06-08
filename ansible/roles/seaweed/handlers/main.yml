@@ -1,0 +1,24 @@
+---
+- name: "restart seaweedfs-master"
+  systemd:
+    name: seaweedfs-master
+    state: restarted
+  become: yes
+
+- name: "restart seaweedfs-volume"
+  systemd:
+    name: seaweedfs-volume
+    state: restarted
+  become: yes
+
+- name: "restart seaweedfs-filer"
+  systemd:
+    name: seaweedfs-filer
+    state: restarted
+  become: yes
+
+- name: "restart seaweedfs-s3"
+  systemd:
+    name: seaweedfs-s3
+    state: restarted
+  become: yes

@@ -1,0 +1,264 @@
+---
+# ==============================================================================
+# 1. USUÁRIO E DIRETÓRIOS
+# ==============================================================================
+- name: "seaweed : Criar grupo do serviço"
+  group:
+    name: "{{ seaweedfs_group }}"
+    state: present
+  become: yes
+
+- name: "seaweed : Criar usuário do serviço"
+  user:
+    name: "{{ seaweedfs_user }}"
+    group: "{{ seaweedfs_group }}"
+    shell: /sbin/nologin
+    create_home: no
+    state: present
+  become: yes
+
+- name: "seaweed : Criar diretórios de dados"
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ seaweedfs_user }}"
+    group: "{{ seaweedfs_group }}"
+    mode: '0755'
+  loop:
+    - "{{ seaweedfs_data_dir }}/master"
+    - "{{ seaweedfs_data_dir }}/volume"
+    - "{{ seaweedfs_data_dir }}/filer"
+  become: yes
+
+# ==============================================================================
+# 2. DOWNLOAD E INSTALAÇÃO
+# ==============================================================================
+- name: "seaweed : Buscar versão estável mais recente no GitHub"
+  uri:
+    url: https://api.github.com/repos/seaweedfs/seaweedfs/releases/latest
+    return_content: yes
+  register: seaweedfs_release
+  become: no
+
+- name: "seaweed : Extrair URL do binário linux_amd64"
+  set_fact:
+    seaweedfs_download_url: "{{ seaweedfs_release.json.assets | selectattr('name', 'equalto', 'linux_amd64.tar.gz') | map(attribute='browser_download_url') | first }}"
+    seaweedfs_version_tag: "{{ seaweedfs_release.json.tag_name }}"
+
+- name: "seaweed : Verificar se binário já está instalado na versão correta"
+  shell: /usr/local/bin/weed version 2>&1
+  register: seaweedfs_installed
+  failed_when: false
+  changed_when: false
+
+- name: "seaweed : Bloco de Instalação (Pula se já atualizado)"
+  when: "seaweedfs_version_tag | string not in seaweedfs_installed.stdout | default('')"
+  block:
+    - name: "seaweed : Download do release Seaweed"
+      get_url:
+        url: "{{ seaweedfs_download_url }}"
+        dest: /tmp/seaweedfs.tar.gz
+        mode: '0644'
+      become: yes
+
+    - name: "seaweed : Extrair binário"
+      unarchive:
+        src: /tmp/seaweedfs.tar.gz
+        dest: /usr/local/bin/
+        remote_src: yes
+        extra_opts:
+          - weed
+      become: yes
+
+    - name: "seaweed : Garantir permissão de execução"
+      file:
+        path: /usr/local/bin/weed
+        mode: '0755'
+        owner: root
+        group: root
+      become: yes
+
+# ==============================================================================
+# 4. SERVIÇOS SYSTEMD (Apenas Instalação dos Units)
+# ==============================================================================
+- name: "seaweed : Instalar unit do Master"
+  template:
+    src: master.service.j2
+    dest: /etc/systemd/system/seaweedfs-master.service
+    mode: '0644'
+  become: yes
+
+- name: "seaweed : Instalar unit do Volume"
+  template:
+    src: volume.service.j2
+    dest: /etc/systemd/system/seaweedfs-volume.service
+    mode: '0644'
+  become: yes
+
+- name: "seaweed : Criar diretório de configuração do Filer"
+  file:
+    path: /etc/seaweedfs
+    state: directory
+    owner: "{{ seaweedfs_user }}"
+    group: "{{ seaweedfs_group }}"
+    mode: '0755'
+  become: yes
+
+- name: "seaweed : Aplicar configuração do Filer"
+  template:
+    src: filer.toml.j2
+    dest: /etc/seaweedfs/filer.toml
+    owner: "{{ seaweedfs_user }}"
+    group: "{{ seaweedfs_group }}"
+    mode: '0644'
+  become: yes
+
+- name: "seaweed : Instalar unit do Filer"
+  template:
+    src: filer.service.j2
+    dest: /etc/systemd/system/seaweedfs-filer.service
+    mode: '0644'
+  become: yes
+
+- name: "seaweed : Criar diretório de configuração do S3"
+  file:
+    path: /etc/seaweedfs
+    state: directory
+    owner: "{{ seaweedfs_user }}"
+    group: "{{ seaweedfs_group }}"
+    mode: '0755'
+  become: yes
+
+- name: "seaweed : Criar arquivo de configuração do S3"
+  copy:
+    dest: /etc/seaweedfs/s3.json
+    owner: "{{ seaweedfs_user }}"
+    group: "{{ seaweedfs_group }}"
+    mode: '0640'
+    content: |
+      {
+        "identities": [
+          {
+            "name": "admin",
+            "credentials": [
+              {
+                "accessKey": "{{ seaweedfs_s3_access_key }}",
+                "secretKey": "{{ seaweedfs_s3_secret_key }}"
+              }
+            ],
+            "actions": [
+              "Admin", "Read", "Write", "List", "Tagging"
+            ]
+          }
+        ],
+        "sts": {
+          "signingKey": "A-Very-Secret-Signing-Key-For-STS" 
+        }
+      }
+  become: yes
+
+- name: "seaweed : Instalar unit do S3 Gateway"
+  template:
+    src: s3.service.j2
+    dest: /etc/systemd/system/seaweedfs-s3.service
+    mode: '0644'
+  become: yes
+
+- name: "seaweed : Recarregar daemon do systemd"
+  systemd:
+    daemon_reload: yes
+  become: yes
+
+# ==============================================================================
+# 5. INICIALIZAÇÃO EM ORDEM
+# ==============================================================================
+- name: "seaweed : Iniciar e habilitar Master"
+  systemd:
+    name: seaweedfs-master
+    state: restarted
+    enabled: yes
+  become: yes
+
+- name: "seaweed : Aguardar Master estar pronto"
+  wait_for:
+    host: "{{ seaweedfs_master_host }}"
+    port: "{{ seaweedfs_master_port }}"
+    delay: 3
+    timeout: 30
+
+- name: "seaweed : Iniciar e habilitar Volume"
+  systemd:
+    name: seaweedfs-volume
+    state: restarted
+    enabled: yes
+  become: yes
+
+- name: "seaweed : Aguardar Volume estar pronto"
+  wait_for:
+    host: "{{ seaweedfs_master_host }}"
+    port: "{{ seaweedfs_volume_port }}"
+    delay: 3
+    timeout: 30
+
+- name: "seaweed : Iniciar e habilitar Filer"
+  systemd:
+    name: seaweedfs-filer
+    state: restarted
+    enabled: yes
+  become: yes
+
+- name: "seaweed : Aguardar Filer estar pronto"
+  wait_for:
+    host: "{{ seaweedfs_master_host }}"
+    port: "{{ seaweedfs_filer_port }}"
+    delay: 3
+    timeout: 30
+
+- name: "seaweed : Pausa para estabilização do Filer"
+  pause:
+    seconds: 5
+
+- name: "seaweed : Iniciar e habilitar S3 Gateway"
+  systemd:
+    name: seaweedfs-s3
+    state: restarted
+    enabled: yes
+  become: yes
+
+# ==============================================================================
+# 6. CRIAÇÃO DO BUCKET PADRÃO (WAREHOUSE)
+# ==============================================================================
+- name: "seaweed : Instalar AWS CLI para gerenciamento de buckets"
+  apt:
+    name: awscli
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: "seaweed : Aguardar S3 Gateway estar pronto"
+  wait_for:
+    host: 127.0.0.1
+    port: 8333
+    delay: 3
+    timeout: 60
+
+- name: "seaweed : Criar bucket 'warehouse' se não existir (AWS CLI)"
+  shell: |
+    export AWS_ACCESS_KEY_ID="{{ seaweedfs_s3_access_key }}"
+    export AWS_SECRET_ACCESS_KEY="{{ seaweedfs_s3_secret_key }}"
+    export AWS_DEFAULT_REGION="us-east-1"
+    
+    # Tenta criar o bucket. O '|| true' evita que o Ansible falhe se o bucket já existir.
+    RESULT=$(aws --endpoint-url http://127.0.0.1:8333 s3 mb s3://warehouse 2>&1)
+    echo "$RESULT"
+    
+    # Lógica para o Ansible saber se mudou algo (criou) ou não (já existia)
+    if echo "$RESULT" | grep -q "make_bucket: warehouse"; then
+      echo "criado"
+    else
+      echo "existe"
+    fi
+  args:
+    executable: /bin/bash
+  register: bucket_result
+  changed_when: "'criado' in bucket_result.stdout"

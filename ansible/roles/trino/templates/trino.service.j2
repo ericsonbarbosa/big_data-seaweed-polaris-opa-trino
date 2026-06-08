@@ -1,0 +1,33 @@
+# ====================================================================
+# INFORMAÇÕES DA UNIDADE (UNIT)
+# ====================================================================
+[Unit]
+Description=Trino Distributed SQL Query Engine
+After=network.target
+
+# ====================================================================
+# CONFIGURAÇÕES BÁSICAS DO SERVIÇO
+# ====================================================================
+[Service]
+Type=forking
+User=trino
+Group=trino
+
+# ====================================================================
+# VARIÁVEIS DE AMBIENTE E COMANDOS DE EXECUÇÃO
+# ====================================================================
+Environment=JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ExecStart=/opt/trino/bin/launcher start
+ExecStop=/opt/trino/bin/launcher stop
+
+# ====================================================================
+# REINÍCIO E LIMITES DO SISTEMA
+# ====================================================================
+Restart=always
+LimitNOFILE=65536
+
+# ====================================================================
+# NÍVEL DE EXECUÇÃO / INSTALAÇÃO
+# ====================================================================
+[Install]
+WantedBy=multi-user.target

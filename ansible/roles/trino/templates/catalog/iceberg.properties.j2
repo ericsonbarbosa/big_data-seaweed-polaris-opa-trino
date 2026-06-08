@@ -1,0 +1,27 @@
+# ====================================================================
+# CONECTOR PRINCIPAL
+# ====================================================================
+connector.name=iceberg
+
+# ====================================================================
+# CONFIGURAÇÃO DO CATÁLOGO REST
+# ====================================================================
+iceberg.catalog.type=rest
+iceberg.rest-catalog.uri=http://192.168.56.101:8182/api/catalog
+iceberg.rest-catalog.warehouse=iceberg
+
+# ====================================================================
+# AUTENTICAÇÃO — token obtido com scope PRINCIPAL_ROLE:ALL
+# ====================================================================
+iceberg.rest-catalog.security=OAUTH2
+iceberg.rest-catalog.oauth2.token={{ polaris_access_token }}
+
+# ====================================================================
+# ARMAZENAMENTO / ARQUIVOS DE DADOS (S3 / SEAWEEDFS)
+# ====================================================================
+fs.native-s3.enabled=true
+s3.endpoint={{ seaweedfs_s3_endpoint }}
+s3.region=us-east-1
+s3.aws-access-key={{ seaweedfs_s3_access_key }}
+s3.aws-secret-key={{ seaweedfs_s3_secret_key }}
+s3.path-style-access=true

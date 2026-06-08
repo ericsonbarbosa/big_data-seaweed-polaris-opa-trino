@@ -1,0 +1,79 @@
+# ==============================================================================
+# 1. INSTALAÇÃO DO POSTGRESQL E SERVIÇO
+# ==============================================================================
+- name: "Postgres : Instalar PostgreSQL"
+  apt:
+    name: 
+      - postgresql
+      - python3-psycopg2  # Necessário para os módulos postgresql_ do Ansible
+    state: present
+  become: yes
+
+- name: "Postgres : Garantir que o serviço está rodando"
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+  become: yes
+
+# ==============================================================================
+# 2. DIRETÓRIO TEMPORÁRIO PARA EXECUÇÃO REMOTA DO ANSIBLE
+# ==============================================================================
+- name: "Postgres : Criar diretório tmp para execução remota do Ansible"
+  file:
+    path: /var/lib/postgresql/.ansible/tmp
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0755'
+  become: yes
+
+# ==============================================================================
+# 3. CRIAÇÃO DO BANCO DE DADOS E USUÁRIO PARA O POLARIS
+# ==============================================================================
+- name: "Postgres : Criar banco de dados para o Apache Polaris"
+  become: yes
+  become_user: postgres
+  postgresql_db:
+    name: "{{ polaris_db_name | default('polaris_db') }}"
+
+- name: "Postgres : Criar usuário para o Polaris e definir senha"
+  become: yes
+  become_user: postgres
+  no_log: true  # Esconde a senha nos logs do Ansible
+  postgresql_user:
+    name: "{{ polaris_db_user | default('polaris_user') }}"
+    password: "{{ polaris_db_pass | default('polaris_pass_secret') }}"
+    encrypted: yes
+    state: present
+
+- name: "Postgres : Garantir privilégios 'ALL' no banco do Polaris"
+  become: yes
+  become_user: postgres
+  postgresql_privs:
+    db: "{{ polaris_db_name | default('polaris_db') }}"
+    objs: ALL_IN_SCHEMA
+    schema: public
+    type: table
+    role: "{{ polaris_db_user | default('polaris_user') }}"
+    privs: ALL
+    state: present
+
+# ==============================================================================
+# 4. CONFIGURAÇÕES DE ACESSO (SUBSTITUINDO HIVE POR POLARIS)
+# ==============================================================================
+- name: "Postgres : Configurar acesso para o Polaris no pg_hba.conf"
+  lineinfile:
+    path: /etc/postgresql/14/main/pg_hba.conf
+    line: "host    {{ polaris_db_name | default('polaris_db') }}    {{ polaris_db_user | default('polaris_user') }}    192.168.56.0/24    md5"
+    insertafter: EOF
+  become: yes
+  notify: "restart postgres"
+
+- name: "Postgres : Escutar em todas as interfaces"
+  lineinfile:
+    path: /etc/postgresql/14/main/postgresql.conf
+    regexp: "^#?listen_addresses ="
+    line: "listen_addresses = '*'"
+  become: yes
+  notify: "restart postgres"

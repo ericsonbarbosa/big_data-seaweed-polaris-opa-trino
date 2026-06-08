@@ -1,0 +1,76 @@
+---
+# ==============================================================================
+# 1. AJUSTES DE REDE E RESOLUÇÃO DE HOSTS
+# ==============================================================================
+- name: "common : Remover entradas de loopback conflitantes para o hostname"
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.(0\.1\.1|0\.2\.1).*{{ ansible_hostname }}'
+    state: absent
+  become: yes
+
+- name: "common : Configurar mapeamento de IPs estáticos do Cluster"
+  lineinfile:
+    path: /etc/hosts
+    line: "{{ item.ip }} {{ item.name }}"
+    regexp: ".*{{ item.name }}$"
+    state: present
+  loop:
+    - { ip: '192.168.56.101', name: 'seaweedfs-node' }
+    - { ip: '192.168.56.102', name: 'trino-sea-node' }
+    - { ip: '192.168.56.103', name: 'k8s-sea-node' }
+  become: yes
+
+# ==============================================================================
+# 2. ATUALIZAÇÃO DO SISTEMA E DEPENDÊNCIAS ESSENCIAIS
+# ==============================================================================
+- name: "common : Atualizar cache do apt"
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: yes
+
+- name: "Common : Instalar dependências básicas"
+  apt:
+    name:
+      - python3-pip
+      - python3-psycopg2
+      - wget
+      - curl
+      - unzip
+      - acl
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: "Common : Atualizar pip"
+  pip:
+    name: pip
+    state: latest
+  become: yes
+
+- name: "common : Instalar ferramentas de diagnóstico de rede"
+  apt:
+    name:
+      - net-tools
+      - iputils-ping
+      - telnet
+      - traceroute
+    state: present
+  become: yes
+
+# ==============================================================================
+# 3. GERENCIAMENTO DE USUÁRIOS E PERMISSÕES
+# ==============================================================================
+- name: "common : Garantir que o grupo vagrant existe"
+  group:
+    name: vagrant
+    state: present
+  become: yes
+
+- name: "common : Garantir que o usuário vagrant está no grupo"
+  user:
+    name: vagrant
+    groups: vagrant
+    append: yes
+  become: yes

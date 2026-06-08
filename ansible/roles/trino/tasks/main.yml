@@ -1,0 +1,157 @@
+# ==============================================================================
+# 1. INSTALAÇÃO E CRIAÇÃO DE USUÁRIO
+# ==============================================================================
+- name: "trino : Garantir usuário e grupo trino"
+  user:
+    name: trino
+    system: yes
+    shell: /usr/sbin/nologin
+  become: yes
+
+- name: "trino : Instalar Java 21"
+  apt:
+    name:
+      - openjdk-21-jdk
+      - python-is-python3
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+  become: yes
+
+- name: "trino : Verificar se o binário do Trino existe localmente"
+  delegate_to: localhost
+  become: no
+  stat:
+    path: "{{ role_path }}/files/trino-server-{{ trino_version }}.tar.gz"
+  register: trino_file
+
+- name: "trino : Validar existência do arquivo"
+  fail:
+    msg: "O binário do Trino não foi encontrado em {{ role_path }}/files/."
+  when: not trino_file.stat.exists
+
+- name: "trino : Enviar e descompactar Servidor"
+  unarchive:
+    src: "trino-server-{{ trino_version }}.tar.gz"
+    dest: "{{ install_dir }}"
+    remote_src: no
+    creates: "{{ install_dir }}/trino-server-{{ trino_version }}"
+  become: yes
+
+- name: "trino : Corrigir ownership do diretório de instalação"
+  file:
+    path: "{{ install_dir }}/trino-server-{{ trino_version }}"
+    state: directory
+    owner: trino
+    group: trino
+    recurse: yes
+  become: yes
+
+- name: "trino : Criar link simbólico"
+  file:
+    src: "{{ install_dir }}/trino-server-{{ trino_version }}"
+    dest: "{{ install_dir }}/trino"
+    state: link
+    force: yes
+  become: yes
+
+- name: "trino : Otimizar RAM removendo plugins desnecessários"
+  shell: |
+    cd {{ install_dir }}/trino/plugin
+    ls -d */ | grep -vE 'iceberg/|tpch/|memory/' | xargs rm -rf
+  become: yes
+  changed_when: false
+
+- name: "trino : Instalar Trino CLI"
+  get_url:
+    url: "https://repo1.maven.org/maven2/io/trino/trino-cli/{{ trino_version }}/trino-cli-{{ trino_version }}-executable.jar"
+    dest: "/usr/local/bin/trino"
+    mode: '0755'
+  become: yes
+
+# ==============================================================================
+# 2. CONFIGURAÇÕES E CONECTORES
+# ==============================================================================
+- name: "trino : Criar estrutura de diretórios e definir owner"
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: trino
+    group: trino
+    mode: '0755'
+  loop:
+    - "{{ install_dir }}/trino/etc/catalog"
+    - "{{ install_dir }}/trino/var"
+  become: yes
+
+- name: "trino : Configurar arquivos principais (.properties, .config)"
+  template:
+    src: "{{ item }}.j2"
+    dest: "{{ install_dir }}/trino/etc/{{ item }}"
+    owner: trino
+    group: trino
+    mode: '0644'
+  loop:
+    - node.properties
+    - jvm.config
+    - config.properties
+  become: yes
+
+- name: "trino : Obter token OAuth2 do Polaris (scope PRINCIPAL_ROLE:ALL)"
+  uri:
+    url: "http://192.168.56.101:8182/api/catalog/v1/oauth/tokens"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: client_credentials
+      client_id: "{{ polaris_client_id }}"
+      client_secret: "{{ polaris_client_secret }}"
+      scope: "PRINCIPAL_ROLE:ALL"
+    status_code: 200
+  register: trino_polaris_token
+  become: no
+
+- name: "trino : Registrar token Polaris como fact"
+  set_fact:
+    polaris_access_token: "{{ trino_polaris_token.json.access_token }}"
+
+- name: "trino : Configurar catálogo Iceberg (Polaris)"
+  template:
+    src: catalog/iceberg.properties.j2
+    dest: "{{ trino_config_dir }}/catalog/iceberg.properties"
+    owner: trino
+    group: trino
+    mode: '0644'
+  notify: restart trino
+  become: yes
+
+# ==============================================================================
+# 3. GERENCIAMENTO PELO SYSTEMD
+# ==============================================================================
+- name: "trino : Garantir permissão de execução no launcher"
+  file:
+    path: /opt/trino/bin/launcher
+    mode: '0755'
+    owner: trino
+    group: trino
+  become: yes
+
+- name: "trino : Configurar serviço Systemd"
+  template:
+    src: trino.service.j2
+    dest: /etc/systemd/system/trino.service
+  become: yes
+
+- name: "trino : Habilitar e iniciar Trino"
+  systemd:
+    name: trino
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: "trino : Aguardar Trino"
+  wait_for:
+    port: 8080
+    delay: 10
+    timeout: 120
