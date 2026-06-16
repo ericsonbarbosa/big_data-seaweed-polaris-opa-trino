@@ -1,0 +1,172 @@
+---
+# ==============================================================================
+# 1. USUÁRIO E DIRETÓRIOS
+# ==============================================================================
+- name: "opa : Criar grupo do serviço"
+  group:
+    name: "{{ opa_group }}"
+    state: present
+  become: yes
+
+- name: "opa : Criar usuário do serviço"
+  user:
+    name: "{{ opa_user }}"
+    group: "{{ opa_group }}"
+    shell: /sbin/nologin
+    create_home: no
+    state: present
+  become: yes
+
+- name: "opa : Criar diretórios base"
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ opa_user }}"
+    group: "{{ opa_group }}"
+    mode: '0755'
+  loop:
+    - "{{ opa_install_dir }}"
+    - "{{ opa_data_dir }}"
+    - "{{ opa_log_dir }}"
+    - "{{ opa_conf_dir }}"
+    - "{{ opa_policies_dir }}"
+  become: yes
+
+# ==============================================================================
+# 2. INSTALAÇÃO DO BINÁRIO
+# ==============================================================================
+- name: "opa : Verificar se binário final já existe"
+  stat:
+    path: "{{ opa_install_dir }}/{{ opa_binary_name }}"
+  register: opa_binary_stat
+
+- name: "opa : Preparar diretório temporário"
+  file:
+    path: /tmp/opa_install
+    state: "{{ item }}"
+  loop: [absent, directory]
+  become: yes
+  when: not opa_binary_stat.stat.exists
+
+- name: "opa : Baixar binário do OPA (Linux AMD64 static)"
+  get_url:
+    url: "https://github.com/open-policy-agent/opa/releases/download/v{{ opa_version }}/opa_linux_amd64_static"
+    dest: /tmp/opa_install/opa
+    mode: '0755'
+    timeout: 60
+  become: yes
+  when: not opa_binary_stat.stat.exists
+
+- name: "opa : Validar que o arquivo baixado é um binário ELF"
+  command: file /tmp/opa_install/opa
+  register: file_check
+  changed_when: false
+  failed_when: "'ELF' not in file_check.stdout"
+  when: not opa_binary_stat.stat.exists
+
+- name: "opa : Instalar binário do OPA"
+  copy:
+    src: /tmp/opa_install/opa
+    dest: "{{ opa_install_dir }}/{{ opa_binary_name }}"
+    remote_src: yes
+    mode: '0755'
+    owner: "{{ opa_user }}"
+    group: "{{ opa_group }}"
+  become: yes
+  when: not opa_binary_stat.stat.exists
+
+- name: "opa : Criar link simbólico em /usr/local/bin"
+  file:
+    src: "{{ opa_install_dir }}/{{ opa_binary_name }}"
+    dest: "/usr/local/bin/opa"
+    state: link
+    force: yes
+  become: yes
+
+# ==============================================================================
+# 3. CONFIGURAÇÃO E SERVIÇO
+# ==============================================================================
+- name: "opa : Aplicar configuração (config.yaml)"
+  template:
+    src: config.yaml.j2
+    dest: "{{ opa_conf_dir }}/config.yaml"
+    owner: "{{ opa_user }}"
+    group: "{{ opa_group }}"
+    mode: '0640'
+  become: yes
+  notify: restart opa
+
+- name: "opa : Instalar unit systemd"
+  template:
+    src: opa.service.j2
+    dest: /etc/systemd/system/opa.service
+    mode: '0644'
+  become: yes
+  notify: reload systemd
+
+- name: "opa : Copiar políticas de exemplo (bootstrap)"
+  copy:
+    content: |
+      # ==============================================================================
+      # POLÍTICA DE AUTORIZAÇÃO HTTP (Rego v1)
+      # ==============================================================================
+      package http.authz
+      
+      default allow := false
+      
+      allow if {
+        input.method == "GET"
+      }
+    dest: "{{ opa_policies_dir }}/http_authz.rego"
+    owner: "{{ opa_user }}"
+    group: "{{ opa_group }}"
+    mode: '0640'
+  become: yes
+  notify: restart opa
+
+- name: "opa : Copiar política de governança de dados"
+  copy:
+    content: |
+      # ==============================================================================
+      # POLÍTICA DE GOVERNANÇA DE DADOS (Rego v1)
+      # ==============================================================================
+      package data.governance
+      
+      deny contains msg if {
+        startswith(input.namespace, "restricted")
+        msg := sprintf("Acesso negado ao namespace restrito: %v", [input.namespace])
+      }
+    dest: "{{ opa_policies_dir }}/governance.rego"
+    owner: "{{ opa_user }}"
+    group: "{{ opa_group }}"
+    mode: '0640'
+  become: yes
+  notify: restart opa
+
+# ==============================================================================
+# 4. INICIALIZAÇÃO E HEALTH CHECK
+# ==============================================================================
+- name: "opa : Recarregar systemd e iniciar serviço"
+  systemd:
+    name: opa
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
+  become: yes
+
+- name: "opa : Aguardar OPA ficar disponível"
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ opa_port }}"
+    delay: 3
+    timeout: 30
+
+- name: "opa : Health check inicial"
+  uri:
+    url: "http://127.0.0.1:{{ opa_port }}/health"
+    return_content: yes
+    status_code: [200]
+  register: opa_health
+  until: opa_health.status == 200
+  retries: 5
+  delay: 2

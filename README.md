@@ -56,19 +56,6 @@ seaweed-trino-lab-data-lakehouse/
 | Apache Polaris        | http://192.168.56.101:8182/q/health/ready | Health Check saudável e perfeitamente conectado ao PostgreSQL |
 | Trino                 | http://192.168.56.102:8080        | Interface web do Trino (login: `admin`, sem senha)                        | 
 
-## Renovação de TOKEN:
-```bash
-# 1. Execute o request para renovar e salvar na variável TOKEN (Python)
-# 1.1 Substitua <CLIENT_ID> = root, <CLIENT_SECRET> = root_secret_changeme
-export TOKEN=$(curl -s -X POST \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials&client_id=<CLIENT_ID>&client_secret=<CLIENT_SECRET>&scope=PRINCIPAL_ROLE:ALL" \
-  http://127.0.0.1:8182/api/catalog/v1/oauth/tokens | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
-
-# Confirme se funcionou
-echo $TOKEN
-```
-
 ## Diagramas
 
 ### Caso de Uso

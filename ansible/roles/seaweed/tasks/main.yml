@@ -119,6 +119,7 @@
     dest: /etc/systemd/system/seaweedfs-filer.service
     mode: '0644'
   become: yes
+  notify: restart seaweedfs-filer
 
 - name: "seaweed : Criar diretório de configuração do S3"
   file:
@@ -139,6 +140,10 @@
       {
         "identities": [
           {
+            "name": "anonymous",
+            "actions": []
+          },
+          {
             "name": "admin",
             "credentials": [
               {
@@ -156,7 +161,29 @@
         }
       }
   become: yes
+  notify: restart seaweedfs-s3
 
+# ==============================================================================
+# 4.1. CONFIGURAÇÃO DE SEGURANÇA (security.toml)
+# ==============================================================================
+- name: "seaweed : Criar arquivo de configuração de segurança"
+  copy:
+    dest: /etc/seaweedfs/security.toml
+    owner: "{{ seaweedfs_user }}"
+    group: "{{ seaweedfs_group }}"
+    mode: '0640'
+    content: |
+      [security]
+      jwt_signing_key = "A-Very-Secret-Signing-Key-For-STS"
+      
+      [jwt]
+      filer_signing_key = "A-Very-Secret-Signing-Key-For-STS"
+      
+      [s3.sse]
+      kek = "A-Very-Secret-Signing-Key-For-SSE"
+  become: yes
+  notify: restart seaweedfs-s3
+  
 - name: "seaweed : Instalar unit do S3 Gateway"
   template:
     src: s3.service.j2

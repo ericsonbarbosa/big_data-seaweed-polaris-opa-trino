@@ -1,0 +1,27 @@
+[Unit]
+Description=Open Policy Agent — Server Mode
+Documentation=https://www.openpolicyagent.org/docs/latest/
+After=network.target
+
+[Service]
+Type=simple
+User={{ opa_user }}
+Group={{ opa_group }}
+WorkingDirectory={{ opa_install_dir }}
+
+ExecStart={{ opa_install_dir }}/{{ opa_binary_name }} run \
+  --server \
+  --addr={{ opa_addr }}:{{ opa_port }} \
+  --log-level={{ opa_log_level }} \
+  {{ opa_policies_dir }}
+
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=opa
+
+[Install]
+WantedBy=multi-user.target
