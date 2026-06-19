@@ -69,90 +69,7 @@ PostgreSQL → SeaweedFS → OPA → Polaris → Trino → K8s
 
 ## Diagramas
 
-### Caso de Uso
-```mermaid
-flowchart TB
-
-    %% =========================
-    %% ATORES
-    %% =========================
-    USER["Usuário / Aplicações SQL"]
-    K8S["Kubernetes (K3s)"]
-
-    %% =========================
-    %% CAMADA COMPUTE
-    %% =========================
-    subgraph COMPUTE["Camada de Processamento"]
-        TRINO["Trino Coordinator + Workers"]
-
-        UC1["Executar consultas SQL"]
-        UC2["Planejar execução distribuída"]
-        UC3["Ler e escrever dados analíticos"]
-
-        TRINO --> UC1
-        TRINO --> UC2
-        TRINO --> UC3
-    end
-
-    %% =========================
-    %% CAMADA METADATA
-    %% =========================
-    subgraph METADATA["Camada de Metadados"]
-        HIVE["Hive Metastore"]
-        PG["PostgreSQL"]
-
-        UC4["Consultar metadados"]
-        UC5["Registrar tabelas e schemas"]
-
-        HIVE --> UC4
-        HIVE --> UC5
-        PG --> UC5
-    end
-
-    %% =========================
-    %% CAMADA STORAGE
-    %% =========================
-    subgraph STORAGE["Camada de Persistência"]
-        S3["SeaweedFS S3 Gateway"]
-        FILER["SeaweedFS Filer"]
-        MASTER["SeaweedFS Master"]
-        VOLUME["SeaweedFS Volume"]
-
-        UC6["Acessar objetos via S3"]
-        UC7["Provisionar volumes persistentes"]
-        UC8["Gerenciar namespace filesystem"]
-        UC9["Persistir blocos físicos"]
-        UC10["Gerenciar localização dos volumes"]
-
-        S3 --> UC6
-        FILER --> UC7
-        FILER --> UC8
-        VOLUME --> UC9
-        MASTER --> UC10
-    end
-
-    %% =========================
-    %% RELAÇÕES DE USO
-    %% =========================
-    USER --> UC1
-
-    UC1 -. include .-> UC2
-    UC2 -. include .-> UC4
-    UC2 -. include .-> UC3
-
-    UC3 -. include .-> UC6
-
-    UC4 -. include .-> UC5
-
-    K8S --> UC7
-    UC7 -. include .-> UC8
-    UC8 -. include .-> UC9
-
-    UC6 -. include .-> UC9
-    UC9 -. include .-> UC10
-```
-
-### Diagrama de Sequência - Open Policy Agent
+### Diagrama de Sequência - Fluxo GitOps do Bundle OPA
 
 ```mermaid
 sequenceDiagram
@@ -183,77 +100,151 @@ sequenceDiagram
     Note over OPA: ✅ Políticas aplicadas<br/>em até 30 segundos
 ```
 
-### Diagrama de Sequência — Trino + Polaris + SeaweedFS
+### Diagrama de Sequência — Governança OPA entre Frameworks
 ```mermaid
 sequenceDiagram
     autonumber
 
     actor User as Usuário SQL
     participant Trino as Trino Coordinator
+    participant Polaris as Polaris Catalog
     participant Hive as Hive Metastore
     participant PG as PostgreSQL
+    participant OPA as OPA Server
     participant S3 as SeaweedFS S3 Gateway
+    participant Filer as SeaweedFS Filer
     participant Master as SeaweedFS Master
     participant Volume as SeaweedFS Volume
+    participant K8s as Kubernetes API
+    participant CSI as SeaweedFS CSI Driver
+    participant Pod as Pod Aplicação
 
-    User->>Trino: Envia consulta SQL
+    Note over User,Pod: CENÁRIO 1 — Polaris criando namespace "financeiro" (via OPA)
 
-    Trino->>Hive: Solicita metadados (Thrift :9083)
-    Hive->>PG: Consulta schemas/tabelas
-    PG-->>Hive: Retorna metadados
-    Hive-->>Trino: Metadados da tabela
+    User->>Polaris: POST /v1/namespaces {name: "financeiro"}
+    Polaris->>OPA: POST /v1/data/polaris/allow<br/>input: {user: "admin",<br/>action: "CreateNamespace",<br/>namespace: "financeiro"}
+    OPA-->>Polaris: {"result": true}
+    Polaris->>Hive: Criar schema "financeiro"
+    Hive->>PG: INSERT INTO schemas (name='financeiro')
+    PG-->>Hive: Schema criado
+    Hive-->>Polaris: Metadados persistidos
+    Polaris->>S3: PUT /buckets/financeiro/
+    S3->>Master: Alocar volume
+    Master-->>S3: Volume ID: 1
+    S3->>Volume: Criar bucket físico
+    Volume-->>S3: Bucket criado
+    S3-->>Polaris: Namespace criado
+    Polaris-->>User: Namespace "financeiro" criado
 
-    Trino->>S3: Solicita leitura dos objetos (S3 API :8333)
+    Note over User,Pod: CENÁRIO 2 — Trino query NEGADA (analista em financeiro)
 
-    S3->>Master: Consulta localização dos volumes
-    Master-->>S3: Retorna localização física
+    User->>Trino: SELECT * FROM financeiro.vendas
+    Trino->>OPA: POST /v1/data/trino/allow<br/>input: {user: "rodrigo",<br/>role: "analista",<br/>action: "Select",<br/>namespace: "financeiro"}
+    OPA-->>Trino: {"result": false}<br/>deny: ["Acesso negado..."]
+    Trino-->>User: Access Denied:<br/>User 'rodrigo' cannot<br/>read namespace 'financeiro'
 
-    S3->>Volume: Lê blocos de dados
-    Volume-->>S3: Dados retornados
+    Note over User,Pod: CENÁRIO 3 — Trino query PERMITIDA (analista em producao)
 
-    S3-->>Trino: Arquivos/objetos do Data Lake
+    User->>Trino: SELECT * FROM producao.clientes
+    Trino->>OPA: POST /v1/data/trino/allow<br/>input: {user: "rodrigo",<br/>role: "analista",<br/>action: "Select",<br/>namespace: "producao"}
+    OPA-->>Trino: {"result": true}
+    Trino->>Hive: GET /v1/namespaces/producao/tables/clientes
+    Hive->>PG: SELECT * FROM tables<br/>WHERE namespace='producao'
+    PG-->>Hive: Metadados Iceberg
+    Hive-->>Trino: Schema + localização S3
+    Trino->>S3: GET /producao/clientes/data/*.parquet (S3 API :8333)
+    S3->>Master: Onde estão os blocos?
+    Master-->>S3: Volume 1, offsets [0-1024]
+    S3->>Volume: READ blocks [0-1024]
+    Volume-->>S3: Dados Parquet (378 bytes)
+    S3-->>Trino: Arquivos Parquet retornados
+    Trino->>Trino: Planejar execução distribuída
+    Trino->>Trino: Executar nos Workers
+    Trino-->>User: 1.234 rows returned
 
-    Trino->>Trino: Planeja execução distribuída
-    Trino->>Trino: Executa tarefas nos Workers
+    Note over User,Pod: CENÁRIO 4 — Kubernetes montando volume SeaweedFS (via OPA)
 
-    Trino-->>User: Retorna resultado SQL
+    User->>K8s: kubectl apply -f pod-with-seaweedfs.yaml
+    K8s->>OPA: POST /v1/data/k8s/allow<br/>input: {serviceAccount: "app-trino",<br/>action: "MountVolume",<br/>bucket: "warehouse"}
+    OPA-->>K8s: {"result": true}
+    K8s->>CSI: Provisionar volume (SeaweedFS CSI Driver)
+    CSI->>Filer: Criar diretório /persistent/warehouse
+    Filer->>Master: Alocar volumes
+    Master-->>Filer: Volumes [1,2,3]
+    Filer->>Volume: Criar estrutura física
+    Volume-->>Filer: Volume provisionado
+    Filer-->>CSI: Volume pronto
+    CSI-->>K8s: PersistentVolume disponível
+    K8s->>Pod: Montar volume em /data
+    Pod->>Filer: READ/WRITE /data/
+    Filer->>Volume: Persistência física
+    Volume-->>Filer: Dados gravados
+    Filer-->>Pod: Operação concluída
+    K8s-->>User: Pod running with /data mounted
 ```
 
-### Diagrama de Sequência — Kubernetes + SeaweedFS (CSI Driver)
+### Diagrama de Sequência — Versão Simplificada
 ```mermaid
 sequenceDiagram
     autonumber
 
-    actor Dev as Desenvolvedor
-    participant K8s as Kubernetes API
-    participant CSI as SeaweedFS CSI Driver
-    participant Filer as SeaweedFS Filer
-    participant Master as SeaweedFS Master
-    participant Volume as SeaweedFS Volume
+    actor User as Usuário SQL
+    participant Trino as Trino
+    participant Polaris as Polaris
+    participant Hive as Hive Metastore
+    participant PG as PostgreSQL
+    participant OPA as OPA
+    participant S3 as SeaweedFS S3
+    participant K8s as Kubernetes
     participant Pod as Pod Aplicação
 
-    Dev->>K8s: Cria PersistentVolumeClaim (PVC)
+    Note over User,Pod: CENÁRIO 1 — Polaris criando namespace
 
-    K8s->>CSI: Solicita provisionamento do volume
+    User->>Polaris: Criar namespace "financeiro"
+    Polaris->>OPA: Pode criar?
+    OPA-->>Polaris: Allow (admin)
+    Polaris->>Hive: Criar schema
+    Hive->>PG: Persistir metadados
+    PG-->>Hive: OK
+    Hive-->>Polaris: OK
+    Polaris->>S3: Criar bucket
+    S3-->>Polaris: OK
+    Polaris-->>User: Namespace criado
 
-    CSI->>Filer: Cria namespace/diretório persistente
+    Note over User,Pod: CENÁRIO 2 — Trino query negada
 
-    Filer->>Master: Solicita localização dos volumes
-    Master-->>Filer: Retorna volumes disponíveis
+    User->>Trino: SELECT * FROM financeiro.vendas
+    Trino->>OPA: Pode ler?
+    OPA-->>Trino: Deny (analista)
+    Trino-->>User: Access Denied
 
-    Filer->>Volume: Cria estrutura física
-    Volume-->>Filer: Volume persistente criado
+    Note over User,Pod: CENÁRIO 3 — Trino query permitida
 
-    Filer-->>CSI: Volume provisionado
+    User->>Trino: SELECT * FROM producao.clientes
+    Trino->>OPA: Pode ler?
+    OPA-->>Trino: Allow (analista + Select)
+    Trino->>Hive: Buscar metadados
+    Hive->>PG: Consultar schemas
+    PG-->>Hive: Metadados Iceberg
+    Hive-->>Trino: Schema + localização S3
+    Trino->>S3: Ler arquivos Parquet
+    S3-->>Trino: Dados retornados
+    Trino->>Trino: Executar query distribuída
+    Trino-->>User: 1.234 rows returned
+
+    Note over User,Pod: CENÁRIO 4 — K8s montando volume
+
+    User->>K8s: kubectl apply (PVC)
+    K8s->>OPA: Pode montar volume?
+    OPA-->>K8s: Allow (service account)
+    K8s->>CSI: Provisionar volume
+    CSI->>S3: Criar estrutura física
+    S3-->>CSI: Volume pronto
     CSI-->>K8s: PersistentVolume disponível
-
-    K8s->>Pod: Monta volume persistente
-
-    Pod->>Filer: Leitura/escrita filesystem
-    Filer->>Volume: Persistência física dos dados
-    Volume-->>Filer: Dados gravados
-
-    Filer-->>Pod: Operação concluída
+    K8s->>Pod: Montar volume em /data
+    Pod->>S3: READ/WRITE
+    S3-->>Pod: Operação concluída
+    K8s-->>User: Pod running
 ```
 
 ## Caso não faça sentido o K8 ao seu projeto:
