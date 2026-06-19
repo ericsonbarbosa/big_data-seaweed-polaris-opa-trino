@@ -17,6 +17,7 @@ seaweed-trino-lab-data-lakehouse/
 │   ├── roles/
 │   │   ├── common/                # Configurações básicas (rede, pacotes, utilitários)
 │   │   ├── seaweed/               # SeaweedFS (Master, Volume, Filer e S3)
+│   │   ├── OPA/                   # Open Policy Agent (Autenticação e Autorização)
 │   │   ├── postgres/              # Banco de metadados do Hive
 │   │   ├── polaris/               # Polaris
 │   │   ├── trino/                 # Engine SQL distribuída
@@ -150,6 +151,38 @@ flowchart TB
     UC6 -. include .-> UC9
     UC9 -. include .-> UC10
 ```
+
+### Diagrama de Sequência - Open Policy Agent
+
+```mermaid
+sequenceDiagram
+    participant Dev as Desenvolvedor
+    participant GH as GitHub
+    participant Script as Script
+    participant S3 as SeaweedFS
+    participant OPA as OPA
+
+    Dev->>GH: Commit + Push
+    Dev->>Script: Executa update-opa-bundle.sh
+    
+    loop 5 Passos do Script
+        Script->>GH: 1. Clona repositório
+        Script->>Script: 2. Valida estrutura
+        Script->>Script: 3. Gera manifest.json
+        Script->>Script: 4. Compacta bundle.tar.gz
+        Script->>S3: 5. Upload via Filer
+    end
+    
+    loop Polling (10-30s)
+        OPA->>S3: Verifica novo bundle
+    end
+    
+    S3-->>OPA: Novo bundle detectado
+    OPA->>OPA: Hot-reload (sem reinício)
+    
+    Note over OPA: ✅ Políticas aplicadas<br/>em até 30 segundos
+```
+
 ### Diagrama de Sequência — Trino + Polaris + SeaweedFS
 ```mermaid
 sequenceDiagram
