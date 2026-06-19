@@ -108,7 +108,6 @@ sequenceDiagram
     actor User as Usuário SQL
     participant Trino as Trino Coordinator
     participant Polaris as Polaris Catalog
-    participant Hive as Hive Metastore
     participant PG as PostgreSQL
     participant OPA as OPA Server
     participant S3 as SeaweedFS S3 Gateway
@@ -124,10 +123,8 @@ sequenceDiagram
     User->>Polaris: POST /v1/namespaces {name: "financeiro"}
     Polaris->>OPA: POST /v1/data/polaris/allow<br/>input: {user: "admin",<br/>action: "CreateNamespace",<br/>namespace: "financeiro"}
     OPA-->>Polaris: {"result": true}
-    Polaris->>Hive: Criar schema "financeiro"
-    Hive->>PG: INSERT INTO schemas (name='financeiro')
-    PG-->>Hive: Schema criado
-    Hive-->>Polaris: Metadados persistidos
+    Polaris->>PG: INSERT INTO namespaces<br/>(name='financeiro')
+    PG-->>Polaris: Namespace persistido
     Polaris->>S3: PUT /buckets/financeiro/
     S3->>Master: Alocar volume
     Master-->>S3: Volume ID: 1
@@ -148,11 +145,11 @@ sequenceDiagram
     User->>Trino: SELECT * FROM producao.clientes
     Trino->>OPA: POST /v1/data/trino/allow<br/>input: {user: "rodrigo",<br/>role: "analista",<br/>action: "Select",<br/>namespace: "producao"}
     OPA-->>Trino: {"result": true}
-    Trino->>Hive: GET /v1/namespaces/producao/tables/clientes
-    Hive->>PG: SELECT * FROM tables<br/>WHERE namespace='producao'
-    PG-->>Hive: Metadados Iceberg
-    Hive-->>Trino: Schema + localização S3
-    Trino->>S3: GET /producao/clientes/data/*.parquet (S3 API :8333)
+    Trino->>Polaris: GET /v1/namespaces/<br/>producao/tables/clientes<br/>(REST Catalog API)
+    Polaris->>PG: SELECT * FROM tables<br/>WHERE namespace='producao'
+    PG-->>Polaris: Metadados Iceberg
+    Polaris-->>Trino: Schema + localização S3
+    Trino->>S3: GET /producao/clientes/<br/>data/*.parquet (S3 API :8333)
     S3->>Master: Onde estão os blocos?
     Master-->>S3: Volume 1, offsets [0-1024]
     S3->>Volume: READ blocks [0-1024]
@@ -164,11 +161,11 @@ sequenceDiagram
 
     Note over User,Pod: CENÁRIO 4 — Kubernetes montando volume SeaweedFS (via OPA)
 
-    User->>K8s: kubectl apply -f pod-with-seaweedfs.yaml
+    User->>K8s: kubectl apply -f<br/>pod-with-seaweedfs.yaml
     K8s->>OPA: POST /v1/data/k8s/allow<br/>input: {serviceAccount: "app-trino",<br/>action: "MountVolume",<br/>bucket: "warehouse"}
     OPA-->>K8s: {"result": true}
-    K8s->>CSI: Provisionar volume (SeaweedFS CSI Driver)
-    CSI->>Filer: Criar diretório /persistent/warehouse
+    K8s->>CSI: Provisionar volume<br/>(SeaweedFS CSI Driver)
+    CSI->>Filer: Criar diretório<br/>/persistent/warehouse
     Filer->>Master: Alocar volumes
     Master-->>Filer: Volumes [1,2,3]
     Filer->>Volume: Criar estrutura física
@@ -191,11 +188,11 @@ sequenceDiagram
     actor User as Usuário SQL
     participant Trino as Trino
     participant Polaris as Polaris
-    participant Hive as Hive Metastore
     participant PG as PostgreSQL
     participant OPA as OPA
     participant S3 as SeaweedFS S3
     participant K8s as Kubernetes
+    participant CSI as CSI Driver
     participant Pod as Pod Aplicação
 
     Note over User,Pod: CENÁRIO 1 — Polaris criando namespace
@@ -203,10 +200,8 @@ sequenceDiagram
     User->>Polaris: Criar namespace "financeiro"
     Polaris->>OPA: Pode criar?
     OPA-->>Polaris: Allow (admin)
-    Polaris->>Hive: Criar schema
-    Hive->>PG: Persistir metadados
-    PG-->>Hive: OK
-    Hive-->>Polaris: OK
+    Polaris->>PG: Persistir metadados
+    PG-->>Polaris: OK
     Polaris->>S3: Criar bucket
     S3-->>Polaris: OK
     Polaris-->>User: Namespace criado
@@ -223,10 +218,10 @@ sequenceDiagram
     User->>Trino: SELECT * FROM producao.clientes
     Trino->>OPA: Pode ler?
     OPA-->>Trino: Allow (analista + Select)
-    Trino->>Hive: Buscar metadados
-    Hive->>PG: Consultar schemas
-    PG-->>Hive: Metadados Iceberg
-    Hive-->>Trino: Schema + localização S3
+    Trino->>Polaris: Buscar metadados (REST)
+    Polaris->>PG: Consultar catálogo
+    PG-->>Polaris: Metadados Iceberg
+    Polaris-->>Trino: Schema + localização S3
     Trino->>S3: Ler arquivos Parquet
     S3-->>Trino: Dados retornados
     Trino->>Trino: Executar query distribuída
