@@ -23,6 +23,22 @@
         delay: 3
         timeout: 30
 
+- name: "Configuração do SeaweedFS (VM 1)"
+  hosts: seaweed-nodes
+  become: yes
+  roles:
+    - role: seaweed
+      tags: seaweed
+  post_tasks:
+    - name: "Forçar execução dos handlers pendentes"
+      meta: flush_handlers
+    - name: "Aguardar SeaweedFS S3 Gateway aceitar conexões"
+      wait_for:
+        host: "192.168.56.101"
+        port: 8333
+        delay: 3
+        timeout: 30
+
 - name: "Configuração do Open Policy Agent (VM 1)"
   hosts: seaweed-nodes
   become: yes
@@ -35,16 +51,14 @@
     - name: "Aguardar OPA aceitar conexões"
       wait_for:
         host: "192.168.56.101"
-        port: 8181
+        port: 8282
         delay: 3
         timeout: 30
 
-- name: "Configuração do SeaweedFS e Polaris (VM 1)"
+- name: "Configuração do Polaris (VM 1)"
   hosts: seaweed-nodes
   become: yes
   roles:
-    - role: seaweed
-      tags: seaweed
     - role: polaris
       tags: polaris
 

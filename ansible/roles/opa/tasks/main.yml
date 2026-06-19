@@ -86,7 +86,7 @@
 # ==============================================================================
 # 3. CONFIGURAÇÃO E SERVIÇO
 # ==============================================================================
-- name: "opa : Aplicar configuração (config.yaml)"
+- name: "opa : Aplicar configuração de bundles (config.yaml)"
   template:
     src: config.yaml.j2
     dest: "{{ opa_conf_dir }}/config.yaml"
@@ -104,12 +104,24 @@
   become: yes
   notify: reload systemd
 
-- name: "opa : Copiar políticas de exemplo (bootstrap)"
+# ------------------------------------------------------------------------------
+# POLÍTICAS LOCAIS (apenas se bundles estiverem DESABILITADOS)
+# ------------------------------------------------------------------------------
+- name: "opa : Remover políticas locais antigas (se bundles habilitados)"
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ opa_policies_dir }}/example.rego"
+    - "{{ opa_policies_dir }}/http_authz.rego"
+    - "{{ opa_policies_dir }}/governance.rego"
+  become: yes
+  when: opa_enable_bundles
+  notify: restart opa
+
+- name: "opa : Copiar políticas de exemplo (apenas se bundles DESABILITADOS)"
   copy:
     content: |
-      # ==============================================================================
-      # POLÍTICA DE AUTORIZAÇÃO HTTP (Rego v1)
-      # ==============================================================================
       package http.authz
       
       default allow := false
@@ -122,25 +134,7 @@
     group: "{{ opa_group }}"
     mode: '0640'
   become: yes
-  notify: restart opa
-
-- name: "opa : Copiar política de governança de dados"
-  copy:
-    content: |
-      # ==============================================================================
-      # POLÍTICA DE GOVERNANÇA DE DADOS (Rego v1)
-      # ==============================================================================
-      package data.governance
-      
-      deny contains msg if {
-        startswith(input.namespace, "restricted")
-        msg := sprintf("Acesso negado ao namespace restrito: %v", [input.namespace])
-      }
-    dest: "{{ opa_policies_dir }}/governance.rego"
-    owner: "{{ opa_user }}"
-    group: "{{ opa_group }}"
-    mode: '0640'
-  become: yes
+  when: not opa_enable_bundles
   notify: restart opa
 
 # ==============================================================================
@@ -170,3 +164,26 @@
   until: opa_health.status == 200
   retries: 5
   delay: 2
+
+# ------------------------------------------------------------------------------
+# VALIDAÇÃO DO BUNDLE (apenas se habilitado)
+# ------------------------------------------------------------------------------
+- name: "opa : Aguardar bundle ser carregado"
+  pause:
+    seconds: 15
+  when: opa_enable_bundles
+
+- name: "opa : Verificar se bundle foi ativado"
+  uri:
+    url: "http://127.0.0.1:{{ opa_port }}/v1/policies"
+    return_content: yes
+  register: opa_policies
+  until: opa_policies.json.result | length > 0
+  retries: 10
+  delay: 3
+  when: opa_enable_bundles
+
+- name: "opa : Exibir políticas carregadas"
+  debug:
+    msg: "Políticas carregadas: {{ opa_policies.json.result | map(attribute='id') | list }}"
+  when: opa_enable_bundles and opa_policies is success

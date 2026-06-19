@@ -36,3 +36,12 @@ opa_tls_key: ""
 # ==============================================================================
 opa_enable_bundles: false
 opa_bundle_service_url: ""
+
+# ==============================================================================
+# BUNDLES (políticas distribuídas via SeaweedFS Filer)
+# ==============================================================================
+opa_enable_bundles: true
+opa_bundle_service_url: "http://192.168.56.101:8888"
+opa_bundle_resource: "/buckets/opa-policies/bundle.tar.gz"
+opa_bundle_polling_min: 10
+opa_bundle_polling_max: 30

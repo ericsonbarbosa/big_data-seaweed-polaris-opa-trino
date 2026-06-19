@@ -46,6 +46,16 @@ seaweed-trino-lab-data-lakehouse/
 
 ---
 
+## Sequencia de Execução
+
+```text
+PostgreSQL → SeaweedFS → OPA → Polaris → Trino → K8s
+     ↓           ↓         ↓        ↓        ↓
+  Dados      Storage    Governança  Catálogo  Consultas
+  brutos     + Buckets  (via S3)    Iceberg   SQL
+```
+---
+
 ## Verificação dos serviços SeaweedFS
 
 | Serviço               | URL                                       | Descrição                                               |
@@ -279,4 +289,17 @@ ssh -i .\.vagrant\machines\seaweedfs-node\virtualbox\private_key vagrant@192.168
 
 # Vagrant destroy - Limpar IP antigo da tabela SSH Windows
 ssh-keygen -R 192.168.56.101
+
+```
+
+### Como executar o script update-opa-bundle.sh
+
+```bash
+
+# script + repositório git
+./update-opa-bundle.sh https://github.com/ericsonbarbosa/opa-policies.git
+
+# caso haja uma brach específica basta acrecentar ao final da uri
+./update-opa-bundle.sh https://github.com/ericsonbarbosa/opa-policies.git main
+
 ```

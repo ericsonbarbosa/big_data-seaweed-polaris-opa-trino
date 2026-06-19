@@ -1,7 +1,8 @@
 [Unit]
 Description=Open Policy Agent — Server Mode
 Documentation=https://www.openpolicyagent.org/docs/latest/
-After=network.target
+After=network.target seaweedfs-s3.service
+Wants=seaweedfs-s3.service
 
 [Service]
 Type=simple
@@ -13,7 +14,7 @@ ExecStart={{ opa_install_dir }}/{{ opa_binary_name }} run \
   --server \
   --addr={{ opa_addr }}:{{ opa_port }} \
   --log-level={{ opa_log_level }} \
-  {{ opa_policies_dir }}
+  --config-file={{ opa_conf_dir }}/config.yaml
 
 Restart=on-failure
 RestartSec=5

@@ -1,34 +1,47 @@
 # ==============================================================================
 # Open Policy Agent — Configuração do Servidor
+# Gerado automaticamente pelo Ansible — NÃO EDITE MANUALMENTE
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# Servidor HTTP
+# Serviços (backends de onde o OPA baixa bundles)
 # ------------------------------------------------------------------------------
 services:
-  local:
-    url: http://127.0.0.1:{{ opa_port }}
+  seaweedfs_filer:
+    url: http://192.168.56.101:8888
+    response_header_timeout_seconds: 5
 
 # ------------------------------------------------------------------------------
-# Bundles (políticas remotas) — Desabilitado por padrão
+# Bundles (políticas distribuídas via SeaweedFS Filer)
 # ------------------------------------------------------------------------------
 {% if opa_enable_bundles %}
 bundles:
-  remote-policies:
-    service: remote
-    resource: bundles/policies.tar.gz
+  governance:
+    service: seaweedfs_filer
+    resource: /buckets/opa-policies/bundle.tar.gz
+    polling:
+      min_delay_seconds: {{ opa_bundle_polling_min }}
+      max_delay_seconds: {{ opa_bundle_polling_max }}
     persist: true
+    size_limit_bytes: 10485760
 {% endif %}
 
 # ------------------------------------------------------------------------------
-# Logging
+# Logs de decisão (auditoria)
 # ------------------------------------------------------------------------------
 decision_logs:
   console: true
 
 # ------------------------------------------------------------------------------
-# Labels (para auditoria e monitoramento)
+# Status Plugin (habilita /v1/status)
+# ------------------------------------------------------------------------------
+status:
+  console: true
+
+# ------------------------------------------------------------------------------
+# Labels (identificação do OPA)
 # ------------------------------------------------------------------------------
 labels:
   environment: "{{ ansible_env.HOSTNAME | default('unknown') }}"
   role: opa-server
+  region: br-south

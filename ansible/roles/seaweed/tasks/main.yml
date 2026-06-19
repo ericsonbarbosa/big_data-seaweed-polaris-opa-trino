@@ -289,3 +289,85 @@
     executable: /bin/bash
   register: bucket_result
   changed_when: "'criado' in bucket_result.stdout"
+
+# ==============================================================================
+# 7. CRIAÇÃO DO BUCKET OPA-POLICIES (PARA BUNDLES)
+# ==============================================================================
+- name: "seaweed : Aguardar S3 Gateway estar pronto para bucket OPA"
+  wait_for:
+    host: 127.0.0.1
+    port: 8333
+    delay: 3
+    timeout: 60
+
+- name: "seaweed : Verificar se bucket opa-policies já existe"
+  shell: |
+    export AWS_ACCESS_KEY_ID="{{ seaweedfs_s3_access_key }}"
+    export AWS_SECRET_ACCESS_KEY="{{ seaweedfs_s3_secret_key }}"
+    export AWS_S3_ADDRESSING_STYLE=path
+    export AWS_DEFAULT_REGION="us-east-1"
+    
+    aws --endpoint-url http://127.0.0.1:8333 s3 ls | grep -q "opa-policies" && echo "existe" || echo "nao_existe"
+  args:
+    executable: /bin/bash
+  register: opa_bucket_check
+  changed_when: false
+
+- name: "seaweed : Criar bucket 'opa-policies' se não existir"
+  shell: |
+    export AWS_ACCESS_KEY_ID="{{ seaweedfs_s3_access_key }}"
+    export AWS_SECRET_ACCESS_KEY="{{ seaweedfs_s3_secret_key }}"
+    export AWS_S3_ADDRESSING_STYLE=path
+    export AWS_DEFAULT_REGION="us-east-1"
+    
+    aws --endpoint-url http://127.0.0.1:8333 s3 mb s3://opa-policies
+  args:
+    executable: /bin/bash
+  when: opa_bucket_check.stdout == "nao_existe"
+  register: opa_bucket_result
+
+- name: "seaweed : Confirmar criação do bucket opa-policies"
+  debug:
+    msg: "Bucket opa-policies criado com sucesso"
+  when: opa_bucket_result is changed
+
+# ==============================================================================
+# 8. UPLOAD INICIAL DO BUNDLE OPA (OPCIONAL)
+# ==============================================================================
+- name: "seaweed : Verificar se bundle local existe no role"
+  stat:
+    path: "{{ role_path }}/files/bundle.tar.gz"
+  register: opa_bundle_local
+  delegate_to: localhost
+  become: no
+
+- name: "seaweed : Verificar se bundle já existe no S3"
+  shell: |
+    export AWS_ACCESS_KEY_ID="{{ seaweedfs_s3_access_key }}"
+    export AWS_SECRET_ACCESS_KEY="{{ seaweedfs_s3_secret_key }}"
+    export AWS_S3_ADDRESSING_STYLE=path
+    export AWS_DEFAULT_REGION="us-east-1"
+    
+    aws --endpoint-url http://127.0.0.1:8333 s3 ls s3://opa-policies/ | grep -q "bundle.tar.gz" && echo "existe" || echo "nao_existe"
+  args:
+    executable: /bin/bash
+  register: opa_bundle_check
+  changed_when: false
+
+- name: "seaweed : Fazer upload inicial do bundle OPA"
+  shell: |
+    export AWS_ACCESS_KEY_ID="{{ seaweedfs_s3_access_key }}"
+    export AWS_SECRET_ACCESS_KEY="{{ seaweedfs_s3_secret_key }}"
+    export AWS_S3_ADDRESSING_STYLE=path
+    export AWS_DEFAULT_REGION="us-east-1"
+    
+    aws --endpoint-url http://127.0.0.1:8333 s3 cp {{ role_path }}/files/bundle.tar.gz s3://opa-policies/bundle.tar.gz
+  args:
+    executable: /bin/bash
+  when: opa_bundle_local.stat.exists and opa_bundle_check.stdout == "nao_existe"
+  register: opa_bundle_upload
+
+- name: "seaweed : Confirmar upload do bundle"
+  debug:
+    msg: "Bundle OPA enviado para s3://opa-policies/bundle.tar.gz"
+  when: opa_bundle_upload is changed
