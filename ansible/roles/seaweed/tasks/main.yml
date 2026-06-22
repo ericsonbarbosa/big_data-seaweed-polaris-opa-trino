@@ -79,7 +79,7 @@
       become: yes
 
 # ==============================================================================
-# 4. SERVIÇOS SYSTEMD (Apenas Instalação dos Units)
+# 3. SERVIÇOS SYSTEMD (Apenas Instalação dos Units)
 # ==============================================================================
 - name: "seaweed : Instalar unit do Master"
   template:
@@ -130,57 +130,29 @@
     mode: '0755'
   become: yes
 
-- name: "seaweed : Criar arquivo de configuração do S3"
-  copy:
+# ==============================================================================
+# 3.1. CONFIGURAÇÃO DO S3 (s3.json via template)
+# ==============================================================================
+- name: "seaweed : Aplicar configuração do S3 (s3.json)"
+  template:
+    src: s3.json.j2
     dest: /etc/seaweedfs/s3.json
     owner: "{{ seaweedfs_user }}"
     group: "{{ seaweedfs_group }}"
     mode: '0640'
-    content: |
-      {
-        "identities": [
-          {
-            "name": "anonymous",
-            "actions": []
-          },
-          {
-            "name": "admin",
-            "credentials": [
-              {
-                "accessKey": "{{ seaweedfs_s3_access_key }}",
-                "secretKey": "{{ seaweedfs_s3_secret_key }}"
-              }
-            ],
-            "actions": [
-              "Admin", "Read", "Write", "List", "Tagging"
-            ]
-          }
-        ],
-        "sts": {
-          "signingKey": "A-Very-Secret-Signing-Key-For-STS" 
-        }
-      }
   become: yes
   notify: restart seaweedfs-s3
 
 # ==============================================================================
-# 4.1. CONFIGURAÇÃO DE SEGURANÇA (security.toml)
+# 3.2. CONFIGURAÇÃO DE SEGURANÇA (security.toml via template)
 # ==============================================================================
-- name: "seaweed : Criar arquivo de configuração de segurança"
-  copy:
+- name: "seaweed : Aplicar configuração de segurança (security.toml)"
+  template:
+    src: security.toml.j2
     dest: /etc/seaweedfs/security.toml
     owner: "{{ seaweedfs_user }}"
     group: "{{ seaweedfs_group }}"
     mode: '0640'
-    content: |
-      [security]
-      jwt_signing_key = "A-Very-Secret-Signing-Key-For-STS"
-      
-      [jwt]
-      filer_signing_key = "A-Very-Secret-Signing-Key-For-STS"
-      
-      [s3.sse]
-      kek = "A-Very-Secret-Signing-Key-For-SSE"
   become: yes
   notify: restart seaweedfs-s3
   
@@ -197,7 +169,7 @@
   become: yes
 
 # ==============================================================================
-# 5. INICIALIZAÇÃO EM ORDEM
+# 4. INICIALIZAÇÃO EM ORDEM
 # ==============================================================================
 - name: "seaweed : Iniciar e habilitar Master"
   systemd:
@@ -253,7 +225,7 @@
   become: yes
 
 # ==============================================================================
-# 6. CRIAÇÃO DO BUCKET PADRÃO (WAREHOUSE)
+# 5. CRIAÇÃO DO BUCKET PADRÃO (WAREHOUSE)
 # ==============================================================================
 - name: "seaweed : Instalar AWS CLI para gerenciamento de buckets"
   apt:
@@ -291,7 +263,7 @@
   changed_when: "'criado' in bucket_result.stdout"
 
 # ==============================================================================
-# 7. CRIAÇÃO DO BUCKET OPA-POLICIES (PARA BUNDLES)
+# 6. CRIAÇÃO DO BUCKET OPA-POLICIES (PARA BUNDLES)
 # ==============================================================================
 - name: "seaweed : Aguardar S3 Gateway estar pronto para bucket OPA"
   wait_for:
@@ -332,7 +304,7 @@
   when: opa_bucket_result is changed
 
 # ==============================================================================
-# 8. UPLOAD INICIAL DO BUNDLE OPA (OPCIONAL)
+# 7. UPLOAD INICIAL DO BUNDLE OPA (OPCIONAL)
 # ==============================================================================
 - name: "seaweed : Verificar se bundle local existe no role"
   stat:

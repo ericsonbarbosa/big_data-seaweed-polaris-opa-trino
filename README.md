@@ -17,11 +17,11 @@ seaweed-trino-lab-data-lakehouse/
 │   ├── roles/
 │   │   ├── common/                # Configurações básicas (rede, pacotes, utilitários)
 │   │   ├── seaweed/               # SeaweedFS (Master, Volume, Filer e S3)
-│   │   ├── OPA/                   # Open Policy Agent (Autenticação e Autorização)
+│   │   ├── opa/                   # Open Policy Agent (Autenticação e Autorização)
 │   │   ├── postgres/              # Banco de metadados do Hive
 │   │   ├── polaris/               # Polaris
 │   │   ├── trino/                 # Engine SQL distribuída
-│   │   └── k3s/                   # Kubernetes leve + CSI Driver (opcional)
+│   │   └── k3s-seaweed-csi/       # Kubernetes leve + CSI Driver (opcional)
 │   │
 │   ├── ansible.cfg                # Ajustes do Ansible
 │   └── playbook.yml               # Orquestração principal
@@ -31,6 +31,7 @@ seaweed-trino-lab-data-lakehouse/
 │   ├── kubernetes-test.md
 │   ├── postgres-test.md
 │   ├── seaweed-test.md
+│   ├── opa-test.md
 │   └── polaris-test.md
 │
 ├── docs/                          # Diagramas e documentação técnica
@@ -42,18 +43,31 @@ seaweed-trino-lab-data-lakehouse/
 ├── setup.sh                       # Execução automatizada do laboratório
 ├── destroy.sh                     # Destruição do ambiente
 ├── .gitignore                     # Exclusão de arquivos temporários
+├── update-opa-bundle.sh           # Script de Atualização de Bundle OPA via GitHub
 └── README.md                      # Guia técnico do projeto
 ```
 
 ---
 
-## Sequencia de Execução
+## Panorama Comportamental
 
 ```text
-PostgreSQL → SeaweedFS → OPA → Polaris → Trino → K8s
-     ↓           ↓         ↓        ↓        ↓
-  Dados      Storage    Governança  Catálogo  Consultas
-  brutos     + Buckets  (via S3)    Iceberg   SQL
+┌─────────────────────────────────────────────────────────────┐
+│                    CONSULTA OPA (Obrigatória)                 │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│  Trino   │    │  Polaris │    │   K8s    │    │   S3     │
+│  (SQL)   │    │ (Catalog)│    │ (Volume) │    │ (Auth)   │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘
+     ↓               ↓               ↓               ↓
+  Query SQL    Create Table    Mount Volume    Read/Write
+     ↓               ↓               ↓               ↓
+  ✅/❌ OPA      ✅/❌ OPA      ✅/❌ OPA      ✅/❌ Auth
+     ↓               ↓
+     ↓         ┌──────────┐
+     └────────>│PostgreSQL│ (Catálogo Iceberg)
+               └──────────┘
 ```
 ---
 
@@ -98,6 +112,35 @@ sequenceDiagram
     OPA->>OPA: Hot-reload (sem reinício)
     
     Note over OPA: ✅ Políticas aplicadas<br/>em até 30 segundos
+```
+
+### Diagrama de Sequência - Fluxograma da Pipiline
+```mermaid
+sequenceDiagram
+    autonumber
+    
+    actor User as Usuário Final
+    participant Trino as Trino
+    participant OPA as OPA (SSOT)
+    participant Polaris as Polaris
+    participant S3 as SeaweedFS
+
+    Note over User,S3: Fluxo com Single Source of Truth
+    
+    User->>Trino: SELECT * FROM producao.vendas<br/>user: rodrigo (analista)
+    
+    Trino->>OPA: POST /v1/data/trino/allow<br/>user: rodrigo, action: SELECT,<br/>namespace: producao
+    OPA-->>Trino: {"result": true}
+    
+    Note over Trino,Polaris: Trino usa SERVICE ACCOUNT<br/>(não o usuário final)
+    
+    Trino->>Polaris: GET /namespaces/producao<br/>Authorization: Bearer <service_token>
+    Polaris->>Polaris: Valida JWT do service account<br/>(tem permissão total)
+    Polaris-->>Trino: Metadados Iceberg
+    
+    Trino->>S3: Ler Parquet<br/>(admin:admin_secret)
+    S3-->>Trino: Dados
+    Trino-->>User: Resultado da query
 ```
 
 ### Diagrama de Sequência — Governança OPA entre Frameworks
@@ -180,7 +223,7 @@ sequenceDiagram
     K8s-->>User: Pod running with /data mounted
 ```
 
-### Diagrama de Sequência — Versão Simplificada
+### Diagrama de Sequência — Governança OPA entre Frameworks (Simplificada)
 ```mermaid
 sequenceDiagram
     autonumber

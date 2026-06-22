@@ -1,12 +1,50 @@
 ---
+# ==============================================================================
+# 1. USUÁRIO E GRUPO DO SERVIÇO
+# ==============================================================================
 seaweedfs_user: seaweedfs
 seaweedfs_group: seaweedfs
+
+# ==============================================================================
+# 2. DIRETÓRIOS DE DADOS
+# ==============================================================================
 seaweedfs_data_dir: /data/seaweedfs
+
+# ==============================================================================
+# 3. REDE E HOSTS
+# ==============================================================================
+seaweedfs_master_host: "192.168.56.101"
+
+# ==============================================================================
+# 4. PORTAS DOS SERVIÇOS
+# ==============================================================================
 seaweedfs_master_port: 9333
 seaweedfs_volume_port: 8080
 seaweedfs_filer_port: 8888
 seaweedfs_s3_port: 8333
-seaweedfs_master_host: "192.168.56.101"
+
+# ==============================================================================
+# 5. CONFIGURAÇÕES ESPECÍFICAS
+# ==============================================================================
 seaweedfs_volume_max: 50
+
+# ==============================================================================
+# 6. CREDENCIAIS S3 (Autenticação do S3 Gateway)
+# ==============================================================================
 seaweedfs_s3_access_key: "admin"
 seaweedfs_s3_secret_key: "admin_secret"
+
+# ==============================================================================
+# 7. SEGURANÇA E CRIPTOGRAFIA
+# ==============================================================================
+# Chave para STS (Security Token Service) - usada no s3.json
+seaweedfs_sts_signing_key: "A-Very-Secret-Signing-Key-For-STS"
+
+# Chave JWT para assinatura de tokens no Filer
+seaweedfs_jwt_signing_key: "A-Very-Secret-Signing-Key-For-STS"
+
+# Chave JWT específica para assinatura no Filer
+seaweedfs_filer_signing_key: "A-Very-Secret-Signing-Key-For-STS"
+
+# Chave de criptografia SSE-S3 (Server-Side Encryption)
+seaweedfs_sse_kek: "A-Very-Secret-Signing-Key-For-SSE"

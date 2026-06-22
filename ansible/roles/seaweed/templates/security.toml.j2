@@ -1,0 +1,8 @@
+[security]
+jwt_signing_key = "{{ seaweedfs_jwt_signing_key }}"
+
+[jwt.filer_signing]
+key = "{{ seaweedfs_filer_signing_key }}"
+
+[s3.sse]
+kek = "{{ seaweedfs_sse_kek }}"
