@@ -13,6 +13,9 @@ set -e  # Sair em caso de erro
 # ==============================================================================
 FILER_URL="http://192.168.56.101:8888"
 FILER_BUCKET="opa-policies"
+S3_BUCKET="opa-policies"
+S3_KEY="bundle.tar.gz"
+S3_ENDPOINT="http://192.168.56.101:8333"
 
 # Diretório temporário para trabalho
 WORK_DIR="/tmp/opa-bundle-update"
@@ -76,11 +79,9 @@ log_info "Branch: $BRANCH"
 # ==============================================================================
 log_info "Passo 1/5: Clonando repositório..."
 
-# Limpar diretório de trabalho se existir
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 
-# Clonar repositório
 if ! git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$WORK_DIR/repo"; then
     log_error "Falha ao clonar repositório. Verifique a URL e a branch."
     exit 1
@@ -93,18 +94,15 @@ log_success "Repositório clonado com sucesso"
 # ==============================================================================
 log_info "Passo 2/5: Validando estrutura do repositório..."
 
-# Verificar se existe a pasta policies/
 if [ ! -d "$WORK_DIR/repo/policies" ]; then
     log_error "Estrutura inválida: pasta 'policies/' não encontrada no repositório"
     log_info "Estrutura esperada:"
     echo "  repo/"
-    echo "  ├── policies/"
-    echo "  │   └── *.rego"
-    echo "  └── manifest.json (opcional)"
+    echo "  └── policies/"
+    echo "      └── *.rego"
     exit 1
 fi
 
-# Verificar se existe pelo menos um arquivo .rego
 if [ -z "$(find "$WORK_DIR/repo/policies" -name '*.rego' -print -quit)" ]; then
     log_error "Nenhum arquivo .rego encontrado em policies/"
     exit 1
@@ -113,20 +111,18 @@ fi
 log_success "Estrutura validada"
 
 # ==============================================================================
-# PASSO 3: GERAR MANIFEST.JSON
+# PASSO 3: GERAR .manifest
 # ==============================================================================
-log_info "Passo 3/5: Gerando manifest.json..."
+log_info "Passo 3/5: Gerando .manifest..."
 
-# Gerar versão baseada em timestamp
 VERSION="v1-$(date +%Y%m%d-%H%M%S)"
 REPO_NAME=$(basename "$REPO_URL" .git)
 COMMIT_HASH=$(git -C "$WORK_DIR/repo" rev-parse --short HEAD)
 
-# Criar manifest.json
-cat > "$WORK_DIR/repo/manifest.json" << EOF
+cat > "$WORK_DIR/repo/.manifest" << EOF
 {
   "revision": "$VERSION-$COMMIT_HASH",
-  "roots": ["governance", "polaris", "trino"],
+  "roots": ["trino"],
   "metadata": {
     "repository": "$REPO_URL",
     "branch": "$BRANCH",
@@ -139,9 +135,8 @@ EOF
 
 log_success "Manifest gerado: $VERSION-$COMMIT_HASH"
 
-# Mostrar conteúdo do manifest
-log_info "Conteúdo do manifest.json:"
-cat "$WORK_DIR/repo/manifest.json" | python3 -m json.tool 2>/dev/null || cat "$WORK_DIR/repo/manifest.json"
+log_info "Conteúdo do .manifest:"
+cat "$WORK_DIR/repo/.manifest" | python3 -m json.tool 2>/dev/null || cat "$WORK_DIR/repo/.manifest"
 
 # ==============================================================================
 # PASSO 4: COMPACTAR BUNDLE
@@ -150,17 +145,14 @@ log_info "Passo 4/5: Compactando bundle..."
 
 cd "$WORK_DIR/repo"
 
-# Compactar bundle (manifest.json + policies/)
-if ! tar -czf "../$BUNDLE_NAME" manifest.json policies/; then
+if ! tar -czf "../$BUNDLE_NAME" .manifest policies/; then
     log_error "Falha ao compactar bundle"
     exit 1
 fi
 
-# Verificar estrutura do bundle
 log_info "Estrutura do bundle:"
 tar -tzf "../$BUNDLE_NAME"
 
-# Validar sintaxe Rego (se OPA estiver disponível)
 if command -v opa &> /dev/null; then
     log_info "Validando sintaxe Rego..."
     if ! opa check policies/; then
@@ -169,40 +161,41 @@ if command -v opa &> /dev/null; then
     fi
     log_success "Sintaxe Rego válida"
 else
-    log_warn "OPA não encontrado, pulando validação de sintaxe"
+    log_warn "OPA não encontrado localmente, pulando validação de sintaxe"
 fi
 
 BUNDLE_SIZE=$(ls -lh "../$BUNDLE_NAME" | awk '{print $5}')
 log_success "Bundle compactado: $BUNDLE_SIZE"
 
 # ==============================================================================
-# PASSO 5: UPLOAD PARA SEEDWEEDFS (VIA FILER)
+# PASSO 5: UPLOAD PARA SEAWEEDFS (VIA S3 API)
 # ==============================================================================
-log_info "Passo 5/5: Enviando bundle para SeaweedFS Filer..."
+log_info "Passo 5/5: Enviando bundle para SeaweedFS via S3 API..."
 
-# Configurações do Filer (sem autenticação)
-FILER_PATH="/buckets/$FILER_BUCKET/$BUNDLE_NAME"
-
-# Verificar se o Filer está acessível
-if ! curl -s -o /dev/null -w "%{http_code}" "$FILER_URL/" | grep -q "200"; then
-    log_error "Filer não está acessível em $FILER_URL"
+if ! command -v aws &> /dev/null; then
+    log_error "AWS CLI não encontrado. Instale com: sudo apt-get install awscli"
     exit 1
 fi
 
-# Fazer upload do bundle via curl
-if ! curl -s -F "file=@../$BUNDLE_NAME" "$FILER_URL$FILER_PATH" > /dev/null; then
-    log_error "Falha ao enviar bundle para Filer"
+if ! aws sts get-caller-identity --endpoint-url "$S3_ENDPOINT" > /dev/null 2>&1; then
+    log_warn "Credenciais não validadas via STS (não suportado pelo SeaweedFS)."
+    log_info "Assumindo credenciais configuradas via 'aws configure'."
+fi
+
+log_info "Enviando bundle via S3 API..."
+if ! aws --endpoint-url "$S3_ENDPOINT" s3 cp "../$BUNDLE_NAME" "s3://$S3_BUCKET/$S3_KEY" --no-progress; then
+    log_error "Falha ao enviar bundle"
+    log_info "💡 Dica: verifique se executou 'aws configure' com as credenciais do SeaweedFS"
     exit 1
 fi
 
-# Verificar se o arquivo foi enviado
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$FILER_URL$FILER_PATH")
-if [ "$HTTP_CODE" != "200" ]; then
-    log_error "Bundle não encontrado após upload (HTTP $HTTP_CODE)"
+log_info "Verificando arquivo no S3..."
+if ! aws --endpoint-url "$S3_ENDPOINT" s3 ls "s3://$S3_BUCKET/$S3_KEY"; then
+    log_error "Bundle não encontrado após upload"
     exit 1
 fi
 
-log_success "Bundle enviado para: $FILER_URL$FILER_PATH"
+log_success "Bundle enviado para: s3://$S3_BUCKET/$S3_KEY"
 
 # ==============================================================================
 # RESUMO FINAL
@@ -214,7 +207,7 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "📦 Bundle: $BUNDLE_NAME"
 echo "🔖 Versão: $VERSION-$COMMIT_HASH"
-echo "📍 Localização: $FILER_URL$FILER_PATH"
+echo "📍 Localização: s3://$S3_BUCKET/$S3_KEY"
 echo "📏 Tamanho: $BUNDLE_SIZE"
 echo ""
 echo "🔄 O OPA detectará a mudança automaticamente em 10-30 segundos"

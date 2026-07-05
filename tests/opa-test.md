@@ -6,9 +6,7 @@
 roles/  
 └── opa/  
     ├── defaults/  
-    │   └── main.yml          # Variáveis de configuração  
-    ├── files/  
-    │   └── opa-1.17.1.tar.gz # Binário offline (já colocado por você)  
+    │   └── main.yml          # Variáveis de configuração   
     ├── handlers/  
     │   └── main.yml          # Handlers para restart/reload  
     ├── tasks/  

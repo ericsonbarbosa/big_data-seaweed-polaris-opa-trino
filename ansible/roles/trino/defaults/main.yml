@@ -3,20 +3,30 @@
 # VERSÃO E DIRETÓRIOS DE INSTALAÇÃO DO TRINO
 # ====================================================================
 trino_version: "442"
-install_dir: "/opt"
-data_dir: "/opt/trino/var"
-trino_config_dir: "{{ install_dir }}/trino-server-{{ trino_version }}/etc"
+trino_install_dir: "/opt/trino-server-{{ trino_version }}"
+trino_symlink: "/opt/trino"
+trino_data_dir_absolute: "{{ trino_install_dir }}/var"
+trino_config_dir: "{{ trino_install_dir }}/etc"
 
 # ====================================================================
 # CREDENCIAIS E ENDPOINT DO SEAWEEDFS (S3)
 # ====================================================================
-# SeaweedFS S3
 seaweedfs_s3_endpoint: "http://192.168.56.101:8333"
 seaweedfs_s3_access_key: "admin"
 seaweedfs_s3_secret_key: "admin_secret"
 
 # ====================================================================
-# CREDENCIAIS E ENDPOINT DO POLARIS
+# POLARIS (Configurações de Conexão)
 # ====================================================================
-polaris_client_id: "root"
-polaris_client_secret: "root_secret_changeme"
+polaris_host: "192.168.56.101"
+polaris_port: 8182
+polaris_trino_service_name: "trino_service"
+
+# ====================================================================
+# OPEN POLICY AGENT (OPA) - Governança de Queries
+# ====================================================================
+opa_host: "192.168.56.101"
+opa_port: 8282
+opa_policy_uri: "http://{{ opa_host }}:{{ opa_port }}/v1/data/trino/allow"
+opa_log_requests: true
+opa_log_responses: true

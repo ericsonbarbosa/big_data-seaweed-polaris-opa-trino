@@ -329,7 +329,7 @@ for VM in "seaweedfs-node:key_seaweed" "trino-sea-node:key_trino" "k8s-node:key_
 
 ## Outros comandos
 
-### Utilizando TAGs Ansible
+### Utilizando TAGs Ansible-Playbook
 ```bash
 ansible-playbook -i ansible/inventory/hosts.ini ansible/playbook.yml --tags "seaweed"
 
@@ -357,6 +357,13 @@ ssh-keygen -R 192.168.56.101
 ### Como executar o script update-opa-bundle.sh
 
 ```bash
+# Necessário instalar o AWS CLI na máquina que está rodando o script
+sudo apt-get install -y awscli
+
+# Configurar AWS CLI com as credenciais do SeaweedFS (ficam armazendas em ~/.aws/credentials)
+aws configure set aws_access_key_id "admin"
+aws configure set aws_secret_access_key "admin_secret"
+aws configure set default.region "us-east-1"
 
 # script + repositório git
 ./update-opa-bundle.sh https://github.com/ericsonbarbosa/opa-policies.git

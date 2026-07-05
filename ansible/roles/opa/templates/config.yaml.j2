@@ -16,7 +16,7 @@ services:
 # ------------------------------------------------------------------------------
 {% if opa_enable_bundles %}
 bundles:
-  governance:
+  trino:
     service: seaweedfs_filer
     resource: /buckets/opa-policies/bundle.tar.gz
     polling:

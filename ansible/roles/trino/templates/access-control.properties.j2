@@ -1,0 +1,14 @@
+# ====================================================================
+# CONTROLE DE ACESSO VIA OPA (Plugin Oficial do Trino)
+# Documentação: https://trino.io/docs/current/security/opa-access-control.html
+# ====================================================================
+
+# Nome do plugin de controle de acesso
+access-control.name=opa
+
+# Endpoint do OPA onde a política trino.allow está publicada
+opa.policy.uri={{ opa_policy_uri }}
+
+# Permitir gerenciamento de permissões (GRANT/REVOKE via SQL)
+# Em produção com OPA puro, mantemos false para evitar conflitos
+opa.allow-permission-management-operations=false

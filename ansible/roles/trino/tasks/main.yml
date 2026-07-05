@@ -1,3 +1,4 @@
+---
 # ==============================================================================
 # 1. INSTALAÇÃO E CRIAÇÃO DE USUÁRIO
 # ==============================================================================
@@ -8,7 +9,7 @@
     shell: /usr/sbin/nologin
   become: yes
 
-- name: "trino : Instalar Java 21"
+- name: "trino : Instalar Java 21 e utilitários de extração"
   apt:
     name:
       - openjdk-21-jdk
@@ -18,29 +19,43 @@
     cache_valid_time: 3600
   become: yes
 
-- name: "trino : Verificar se o binário do Trino existe localmente"
-  delegate_to: localhost
-  become: no
+- name: "trino : Verificar se Trino já está instalado"
   stat:
-    path: "{{ role_path }}/files/trino-server-{{ trino_version }}.tar.gz"
-  register: trino_file
-
-- name: "trino : Validar existência do arquivo"
-  fail:
-    msg: "O binário do Trino não foi encontrado em {{ role_path }}/files/."
-  when: not trino_file.stat.exists
-
-- name: "trino : Enviar e descompactar Servidor"
-  unarchive:
-    src: "trino-server-{{ trino_version }}.tar.gz"
-    dest: "{{ install_dir }}"
-    remote_src: no
-    creates: "{{ install_dir }}/trino-server-{{ trino_version }}"
+    path: "{{ trino_install_dir }}/bin/launcher"
+  register: trino_installed
   become: yes
 
+# ==============================================================================
+# DOWNLOAD E EXTRAÇÃO DIRETO DO MAVEN CENTRAL (Infalível)
+# ==============================================================================
+- name: "trino : Baixar Trino Server direto do Maven Central"
+  get_url:
+    url: "https://repo1.maven.org/maven2/io/trino/trino-server/{{ trino_version }}/trino-server-{{ trino_version }}.tar.gz"
+    dest: "/tmp/trino-server.tar.gz"
+    mode: '0644'
+    timeout: 60
+  become: yes
+  when: not trino_installed.stat.exists
+
+- name: "trino : Extrair Trino Server em /opt usando tar nativo"
+  command: tar -xzf /tmp/trino-server.tar.gz -C /opt
+  become: yes
+  args:
+    creates: "{{ trino_install_dir }}/bin/launcher"
+
+- name: "trino : Limpar arquivo temporário do download"
+  file:
+    path: "/tmp/trino-server.tar.gz"
+    state: absent
+  become: yes
+  when: not trino_installed.stat.exists
+
+# ==============================================================================
+# PÓS-INSTALAÇÃO
+# ==============================================================================
 - name: "trino : Corrigir ownership do diretório de instalação"
   file:
-    path: "{{ install_dir }}/trino-server-{{ trino_version }}"
+    path: "{{ trino_install_dir }}"
     state: directory
     owner: trino
     group: trino
@@ -49,19 +64,15 @@
 
 - name: "trino : Criar link simbólico"
   file:
-    src: "{{ install_dir }}/trino-server-{{ trino_version }}"
-    dest: "{{ install_dir }}/trino"
+    src: "{{ trino_install_dir }}"
+    dest: "{{ trino_symlink }}"
     state: link
     force: yes
   become: yes
 
-- name: "trino : Otimizar RAM removendo plugins desnecessários"
-  shell: |
-    cd {{ install_dir }}/trino/plugin
-    ls -d */ | grep -vE 'iceberg/|tpch/|memory/' | xargs rm -rf
-  become: yes
-  changed_when: false
-
+# ==============================================================================
+# 1.5 TRINO CLI (Cliente de Linha de Comando)
+# ==============================================================================
 - name: "trino : Instalar Trino CLI"
   get_url:
     url: "https://repo1.maven.org/maven2/io/trino/trino-cli/{{ trino_version }}/trino-cli-{{ trino_version }}-executable.jar"
@@ -80,14 +91,15 @@
     group: trino
     mode: '0755'
   loop:
-    - "{{ install_dir }}/trino/etc/catalog"
-    - "{{ install_dir }}/trino/var"
+    - "{{ trino_config_dir }}/catalog"
+    - "{{ trino_data_dir_absolute }}"
+    - "{{ trino_data_dir_absolute }}/log"
   become: yes
 
 - name: "trino : Configurar arquivos principais (.properties, .config)"
   template:
     src: "{{ item }}.j2"
-    dest: "{{ install_dir }}/trino/etc/{{ item }}"
+    dest: "{{ trino_config_dir }}/{{ item }}"
     owner: trino
     group: trino
     mode: '0644'
@@ -97,15 +109,62 @@
     - config.properties
   become: yes
 
-- name: "trino : Obter token OAuth2 do Polaris (scope PRINCIPAL_ROLE:ALL)"
+# ==============================================================================
+# 4. OBTER CREDENCIAIS DO SERVICE ACCOUNT (do Polaris)
+# ==============================================================================
+- name: "trino : Verificar se arquivo de credenciais existe no control node"
+  delegate_to: localhost
+  become: no
+  stat:
+    path: "{{ playbook_dir }}/credentials/trino_service.json"
+  register: credentials_file
+
+- name: "trino : Falhar se credenciais não existirem"
+  fail:
+    msg: "Credenciais do service account não encontradas. Execute primeiro o playbook do Polaris."
+  when: not credentials_file.stat.exists
+
+- name: "trino : Criar diretório /etc/trino para configurações"
+  file:
+    path: /etc/trino
+    state: directory
+    owner: trino
+    group: trino
+    mode: '0755'
+  become: yes
+
+- name: "trino : Copiar credenciais do service account para o Trino"
+  copy:
+    src: "{{ playbook_dir }}/credentials/trino_service.json"
+    dest: /etc/trino/service-account.json
+    owner: trino
+    group: trino
+    mode: '0600'
+  become: yes
+
+- name: "trino : Ler credenciais do service account"
+  slurp:
+    src: /etc/trino/service-account.json
+  register: service_account_creds
+  become: yes
+
+- name: "trino : Extrair clientId e clientSecret"
+  set_fact:
+    polaris_trino_client_id: "{{ (service_account_creds.content | b64decode | from_json).clientId }}"
+    polaris_trino_client_secret: "{{ (service_account_creds.content | b64decode | from_json).clientSecret }}"
+
+# ==============================================================================
+# 5. OBTER TOKEN DO SERVICE ACCOUNT (OAuth2)
+# ==============================================================================
+- name: "trino : Obter token OAuth2 do Polaris (SERVICE ACCOUNT)"
   uri:
-    url: "http://192.168.56.101:8182/api/catalog/v1/oauth/tokens"
+    url: "http://{{ polaris_host }}:{{ polaris_port }}/api/catalog/v1/oauth/tokens"
     method: POST
     body_format: form-urlencoded
     body:
       grant_type: client_credentials
-      client_id: "{{ polaris_client_id }}"
-      client_secret: "{{ polaris_client_secret }}"
+      client_id: "{{ polaris_trino_client_id }}"
+      client_secret: "{{ polaris_trino_client_secret }}"
       scope: "PRINCIPAL_ROLE:ALL"
     status_code: 200
   register: trino_polaris_token
@@ -115,7 +174,7 @@
   set_fact:
     polaris_access_token: "{{ trino_polaris_token.json.access_token }}"
 
-- name: "trino : Configurar catálogo Iceberg (Polaris)"
+- name: "trino : Configurar catálogo Iceberg (Polaris com Service Account)"
   template:
     src: catalog/iceberg.properties.j2
     dest: "{{ trino_config_dir }}/catalog/iceberg.properties"
@@ -126,11 +185,89 @@
   become: yes
 
 # ==============================================================================
-# 3. GERENCIAMENTO PELO SYSTEMD
+# 6. INSTALAÇÃO DO PLUGIN OPA (Governança de Queries)
+# ==============================================================================
+- name: "trino : Criar diretório do plugin OPA"
+  file:
+    path: "{{ trino_install_dir }}/plugin/opa"
+    state: directory
+    owner: trino
+    group: trino
+    mode: '0755'
+  become: yes
+
+- name: "trino : Criar diretório temporário para extração do plugin"
+  file:
+    path: /tmp/trino-opa-plugin
+    state: directory
+    mode: '0755'
+  become: yes
+
+- name: "trino : Baixar e extrair plugin OPA do Maven Central (ZIP com dependências)"
+  unarchive:
+    src: "https://repo1.maven.org/maven2/io/trino/trino-opa/{{ trino_version }}/trino-opa-{{ trino_version }}.zip"
+    dest: /tmp/trino-opa-plugin
+    remote_src: yes
+  become: yes
+
+- name: "trino : Localizar e mover JARs para o diretório final do plugin"
+  shell: |
+    # Encontrar o diretório que contém o JAR principal (lida com subpastas do ZIP)
+    SRC_DIR=$(find /tmp/trino-opa-plugin -name "trino-opa-{{ trino_version }}.jar" -exec dirname {} \; | head -1)
+    if [ -z "$SRC_DIR" ]; then
+      echo "ERRO: JAR principal do plugin OPA não encontrado no ZIP extraído!"
+      exit 1
+    fi
+    echo "Copiando JARs de: $SRC_DIR"
+    
+    # Copiar TODOS os JARs (plugin + dependências) para o diretório do Trino
+    cp -v "$SRC_DIR"/*.jar {{ trino_install_dir }}/plugin/opa/
+    
+    # Ajustar permissões
+    chown trino:trino {{ trino_install_dir }}/plugin/opa/*.jar
+  args:
+    executable: /bin/bash
+  become: yes
+
+- name: "trino : Limpar diretório temporário de extração"
+  file:
+    path: /tmp/trino-opa-plugin
+    state: absent
+  become: yes
+
+- name: "trino : Validar que plugin OPA foi instalado (múltiplos JARs)"
+  find:
+    paths: "{{ trino_install_dir }}/plugin/opa"
+    patterns: "*.jar"
+    file_type: file
+  register: opa_jars
+  become: yes
+
+- name: "trino : Exibir quantidade de JARs do plugin OPA instalados"
+  debug:
+    msg: "Plugin OPA instalado com sucesso! Total de {{ opa_jars.matched }} JARs encontrados."
+
+- name: "trino : Falhar se plugin OPA não tiver dependências"
+  fail:
+    msg: "Plugin OPA não foi instalado corretamente. Encontrados apenas {{ opa_jars.matched }} JARs. Esperado > 5."
+  when: opa_jars.matched < 5
+
+- name: "trino : Aplicar configuração do plugin OPA (access-control.properties)"
+  template:
+    src: access-control.properties.j2
+    dest: "{{ trino_install_dir }}/etc/access-control.properties"
+    owner: trino
+    group: trino
+    mode: '0640'
+  become: yes
+  notify: restart trino
+
+# ==============================================================================
+# 7. GERENCIAMENTO PELO SYSTEMD
 # ==============================================================================
 - name: "trino : Garantir permissão de execução no launcher"
   file:
-    path: /opt/trino/bin/launcher
+    path: "{{ trino_symlink }}/bin/launcher"
     mode: '0755'
     owner: trino
     group: trino

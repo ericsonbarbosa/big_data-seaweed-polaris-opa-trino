@@ -39,6 +39,8 @@
       - curl
       - unzip
       - acl
+      - tar
+      - gzip
     state: present
     update_cache: yes
   become: yes

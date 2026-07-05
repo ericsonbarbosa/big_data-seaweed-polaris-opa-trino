@@ -1,7 +1,7 @@
 # 🚀 Guia de Testes de Integração e Sistema: Ecossistema Big Data
-## SeaweedFS | Hive | Trino
+## SeaweedFS | Polaris | OPA | Trino
 
-Este documento fornece as instruções passo a passo para acessar as plataformas e executar os testes de integração que validam a fluidez dos dados entre o armazenamento (S3), o catálogo de metadados (Hive) e o motor de consulta distribuída (Trino).
+Este documento fornece as instruções passo a passo para acessar as plataformas e executar os testes de integração que validam a fluidez dos dados entre o armazenamento (S3), o catálogo de metadados (Polaris) e o motor de consulta distribuída (Trino).
 
 ---
 ## Teste 1 - Acesse a interface UI do Trino:
@@ -10,7 +10,7 @@ Login: admin
 http://192.168.56.102:8080
 
 ## Teste 2 - SeaweedFS-Node (Armazenamento e Metadados)
-Este nó contém o **S3** e o **Hive Server/Metastore**.
+Este nó contém o **S3** e o **Polaris**.
 
 * **Acesso à VM:** 
     ```bash
@@ -23,7 +23,7 @@ Este nó contém o **S3** e o **Hive Server/Metastore**.
     *Nota: O comando deve retornar que está ecutando: tcp 0.0.0.0:9083*
 
 ## Teste 3 - Trino-Node (Motor de Consulta)
-Este nó é responsável pela execução de queries de alta performance sobre os dados do Hadoop.
+Este nó é responsável pela execução de queries de alta performance sobre os dados do SeaweedFS.
 
 * **Acesso à VM:**
     ```bash
@@ -47,14 +47,14 @@ Este nó é responsável pela execução de queries de alta performance sobre os
 
 * **Acesso ao Trino CLI:**
     ```bash
-    trino --catalog iceberg --schema default
+    # Modifique de "admin" para qualquer outro usuário cadastrado no OPA 
+    trino --catalog iceberg --user admin
     ```
-    *Nota: O Trino utiliza conectores para "enxergar" o catálogo do Hive e os arquivos físicos no HDFS.*
 
 ---
 
-### ✅ Passo A: Escrita e Consulta via Trino CLI
-Objetivo: Validar se o Trino consegue ler do Hive e criar novos arquivos no S3. No `Trino CLI`, execute:
+### ✅ Passo A: Escrita e Consulta via Trino CLI passando pelo OPA
+Objetivo: Validar se o Trino consegue ler do Polaris e criar novos arquivos no S3. No `Trino CLI`, execute:
 
 ```sql
 -- Deve listar o catalog iceberg
@@ -88,7 +88,7 @@ AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=admin_secret aws --endpoint-url ht
 http://192.168.56.101:8888/buckets/warehouse/
 ```
 
-### ✅ Passo C: – Validar as tabelas do Metastore no PostgreSQL
+### ✅ Passo C: – Validar as tabelas no PostgreSQL
 Conecte‑se ao PostgreSQL e verifique se as informações da tabela criada foram registradas:
 
 ```bash
@@ -106,8 +106,52 @@ Saída esperada:
 
 ```sql
 -- 1. Exclusão do schema
-DROP SCHEMA IF EXISTS hive.lab_ed CASCADE;
+DROP SCHEMA IF EXISTS iceberg.sandbox CASCADE;
 
 -- 2. Conferir exclusão do schema, deve retornar (0 rows)
 SHOW TABLES;
+```
+
+## ❌ Restrições OPA ao user Rodrigo via Trino:
+
+✅ Permite admin fazer tudo  
+✅ Permite rodrigo fazer operações básicas (SHOW, USE, SELECT) em schemas não-financeiros  
+❌ Bloqueia  e oculta Rodrigo no schema financeiro  
+
+**Acesso ao Trino CLI:**
+
+```bash
+# Usuário Rodrigo com restrições ao financeiro 
+trino --catalog iceberg --user rodrigo
+```
+
+```sql
+-- Deve funcionar agora
+SHOW SCHEMAS;
+-- Esperado: Lista de schemas (sandbox, api_lab, etc.) --> financeiro (oculto)
+
+USE sandbox;
+-- Esperado: USE
+
+SELECT * FROM teste;
+-- Esperado: Dados retornados
+
+-- Deve continuar bloqueado
+SELECT * FROM financeiro.vendas_confidenciais;
+-- Esperado: Access Denied
+```
+
+## Monitoramento:
+
+### Requests via terminal "Trino" referentes ao FilterSchemas e FilterCatalogs dos OPA:
+
+```bash
+sudo tail -f /opt/trino-server-442/var/var/log/server.log | grep --line-buffered "FilterSchemas\|FilterCatalogs"
+```
+
+### Requrequests e Response via terminal "Trino" referentes ao SCHEMA financeiro "Access Denied":
+
+```bash
+sudo tail -f /opt/trino-server-442/var/var/log/server.log | \
+  grep --line-buffered "financeiro\|result.*false"
 ```

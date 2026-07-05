@@ -6,8 +6,9 @@ node.id={{ ansible_hostname }}
 
 # ====================================================================
 # DIRETÓRIOS E DADOS
+# IMPORTANTE: Usar caminho ABSOLUTO para evitar dupla resolução pelo launcher
 # ====================================================================
-node.data-dir={{ data_dir }}
+node.data-dir={{ trino_install_dir }}/var
 
 # ====================================================================
 # REDE E COMUNICAÇÃO

@@ -13,17 +13,21 @@ Type=forking
 User=trino
 Group=trino
 
+# Diretório de trabalho (IMPORTANTE para resolver caminhos corretamente)
+WorkingDirectory={{ trino_install_dir }}
+
 # ====================================================================
 # VARIÁVEIS DE AMBIENTE E COMANDOS DE EXECUÇÃO
 # ====================================================================
 Environment=JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-ExecStart=/opt/trino/bin/launcher start
-ExecStop=/opt/trino/bin/launcher stop
+ExecStart={{ trino_symlink }}/bin/launcher start
+ExecStop={{ trino_symlink }}/bin/launcher stop
 
 # ====================================================================
 # REINÍCIO E LIMITES DO SISTEMA
 # ====================================================================
 Restart=always
+RestartSec=10
 LimitNOFILE=65536
 
 # ====================================================================
