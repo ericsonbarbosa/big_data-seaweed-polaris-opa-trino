@@ -41,8 +41,8 @@ Este nó é responsável pela execução de queries de alta performance sobre os
     sudo sed -i "s|^iceberg.rest-catalog.oauth2.token=.*|iceberg.rest-catalog.oauth2.token=$TOKEN_TRINO|" \
     /opt/trino/etc/catalog/iceberg.properties
 
-    # Restart do serviço com pausa de 15 segundos:
-    sudo systemctl restart trino && sleep 15
+    # Restart do serviço com pausa de 30 segundos:
+    sudo systemctl restart trino && sleep 30
     ```
 
 * **Acesso ao Trino CLI:**

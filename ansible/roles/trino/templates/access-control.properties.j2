@@ -9,6 +9,9 @@ access-control.name=opa
 # Endpoint do OPA onde a política trino.allow está publicada
 opa.policy.uri={{ opa_policy_uri }}
 
+# Column Masking (ofuscação de dados sensíveis)
+opa.policy.column-masking-uri={{ opa_policy_uri | regex_replace('/allow$', '/columnMask') }}
+
 # Permitir gerenciamento de permissões (GRANT/REVOKE via SQL)
 # Em produção com OPA puro, mantemos false para evitar conflitos
 opa.allow-permission-management-operations=false
